@@ -1,39 +1,69 @@
-// 这个库解决了移动端异形屏的显示安全区域的问题，比如iPhoneX，iPhone11等
-// 这个库引入后，将设置全局的css变量 --mobile-safe-area-inset-top, --mobile-safe-area-inset-bottom, --mobile-safe-area-inset-left, --mobile-safe-area-inset-right
-// 通过这些变量，可以在css中设置安全区域的padding，margin等，来规避异形屏的显示问题
-// 为了达到最好的效果，在 html 的 meta 标签中设置 viewport-fit=cover
-
-import { SafeArea } from 'capacitor-plugin-safe-area'
+import { Capacitor, registerPlugin } from '@capacitor/core'
 import { Keyboard } from '@capacitor/keyboard'
+import { SafeArea } from 'capacitor-plugin-safe-area'
 
-SafeArea.getSafeAreaInsets().then(({ insets }) => {
+interface RoundedCorners {
+  supported: boolean
+  topLeft: number
+  topRight: number
+  bottomRight: number
+  bottomLeft: number
+}
+
+interface ScreenGeometryPlugin {
+  getRoundedCorners(): Promise<RoundedCorners>
+}
+
+const ScreenGeometry = registerPlugin<ScreenGeometryPlugin>('ScreenGeometry')
+const DEFAULT_DOCK_RADIUS = 26
+
+function setSafeAreaInsets(insets: { top: number; right: number; bottom: number; left: number }) {
   for (const [key, value] of Object.entries(insets)) {
     document.documentElement.style.setProperty(`--mobile-safe-area-inset-${key}`, `${value}px`)
   }
+}
+
+function setDockRadius(deviceRadius: number) {
+  const radius = deviceRadius > 0 ? Math.min(32, Math.max(22, Math.round(deviceRadius * 0.62))) : DEFAULT_DOCK_RADIUS
+  document.documentElement.style.setProperty('--mobile-device-corner-radius', `${deviceRadius}px`)
+  document.documentElement.style.setProperty('--mobile-dock-corner-radius', `${radius}px`)
+}
+
+async function refreshRoundedCorners() {
+  if (Capacitor.getPlatform() !== 'android') {
+    setDockRadius(0)
+    return
+  }
+  try {
+    const corners = await ScreenGeometry.getRoundedCorners()
+    const bottomRadii = [corners.bottomLeft, corners.bottomRight].filter((radius) => radius > 0)
+    setDockRadius(bottomRadii.length > 0 ? Math.min(...bottomRadii) : 0)
+  } catch (error) {
+    console.warn('Failed to read Android screen corner radius:', error)
+    setDockRadius(0)
+  }
+}
+
+void SafeArea.getSafeAreaInsets().then(({ insets }) => {
+  setSafeAreaInsets(insets)
+})
+void refreshRoundedCorners()
+
+void SafeArea.addListener('safeAreaChanged', ({ insets }) => {
+  setSafeAreaInsets(insets)
+  void refreshRoundedCorners()
 })
 
-SafeArea.getStatusBarHeight().then(({ statusBarHeight }) => {
-  // console.log(statusBarHeight, 'statusbarHeight');
+void Keyboard.addListener('keyboardWillShow', () => {
+  document.documentElement.style.setProperty('--mobile-safe-area-inset-bottom', '0px')
 })
-;(async () => {
-  // when safe-area changed
-  const eventListener = await SafeArea.addListener('safeAreaChanged', (data) => {
-    const { insets } = data
-    for (const [key, value] of Object.entries(insets)) {
-      document.documentElement.style.setProperty(`--mobile-safe-area-inset-${key}`, `${value}px`)
-    }
+
+void Keyboard.addListener('keyboardWillHide', () => {
+  void SafeArea.getSafeAreaInsets().then(({ insets }) => {
+    setSafeAreaInsets(insets)
   })
-  // eventListener.remove();
-})()
-
-Keyboard.addListener('keyboardWillShow', async (info) => {
-  document.documentElement.style.setProperty(`--mobile-safe-area-inset-bottom`, `0px`)
 })
 
-Keyboard.addListener('keyboardWillHide', () => {
-  SafeArea.getSafeAreaInsets().then(({ insets }) => {
-    for (const [key, value] of Object.entries(insets)) {
-      document.documentElement.style.setProperty(`--mobile-safe-area-inset-${key}`, `${value}px`)
-    }
-  })
+window.addEventListener('resize', () => {
+  void refreshRoundedCorners()
 })

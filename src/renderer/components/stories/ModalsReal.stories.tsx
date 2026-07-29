@@ -59,7 +59,7 @@ export const ModalRegistryStates: StoryObj = {
         <Text size="sm" c="dimmed">
           Registered modal ids include welcome, file-parse-error, content-viewer, session-settings, app-store-rating,
           agent-mode-reward-claim-success, artifact-preview, clear-session-list, export-chat, message-edit, json-viewer,
-          report-content, model-edit, thread-name-edit, vibedrop-publish, and copilot-settings.
+          model-edit, thread-name-edit, vibedrop-publish, and copilot-settings.
         </Text>
       </Paper>
     </Stack>
@@ -253,24 +253,6 @@ export const ModelEditStates: StoryObj = {
             type: 'chat',
           },
         }}
-      />
-    </ModalPreview>
-  ),
-}
-
-export const ReportContentStates: StoryObj = {
-  name: 'Report content modal type and detail states',
-  parameters: {
-    uiInventoryTargets: ['src/renderer/modals/ReportContent'],
-  },
-  render: () => (
-    <ModalPreview
-      title="ReportContent"
-      description="Actual report content modal with content id, report type selector, details textarea, cancel, and submit action."
-    >
-      <OpenModal
-        loadModal={() => import('@/modals/ReportContent').then((module) => module.default)}
-        props={{ contentId: 'img-item-story-0001' }}
       />
     </ModalPreview>
   ),

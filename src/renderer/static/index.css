@@ -162,6 +162,47 @@ html[data-theme="light"] {
   padding-bottom: 0;
 }
 
+.mobile-input-dock-shell {
+  z-index: 10;
+  padding-right: 14px !important;
+  padding-bottom: 18px !important;
+  padding-left: 14px !important;
+  background: transparent !important;
+}
+
+.mobile-floating-input-layer {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 20;
+  pointer-events: none;
+  background: transparent;
+}
+
+.mobile-floating-input-layer .mobile-input-dock-shell {
+  pointer-events: auto;
+}
+
+.mobile-message-list-dock-spacer {
+  height: calc(var(--mobile-input-dock-height, 150px) + 8px);
+}
+
+.mobile-message-list-with-floating-dock .mobile-scroll-to-bottom-button {
+  bottom: calc(var(--mobile-input-dock-height, 150px) + 8px) !important;
+}
+
+.mobile-input-dock {
+  border-radius: var(--mobile-dock-corner-radius, 26px) !important;
+  background: color-mix(in srgb, var(--chatbox-background-primary) 70%, transparent);
+  box-shadow:
+    0 14px 34px rgba(0, 0, 0, 0.18),
+    0 3px 10px rgba(0, 0, 0, 0.1);
+  transform: translateY(-2px);
+  -webkit-backdrop-filter: blur(22px) saturate(1.15);
+  backdrop-filter: blur(22px) saturate(1.15);
+}
+
 .ToolBar {
   /* 移动端异形屏的显示问题 */
   padding-top: env(safe-area-inset-top, 0px);

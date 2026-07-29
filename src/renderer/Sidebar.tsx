@@ -7,7 +7,6 @@ import {
   IconCirclePlus,
   IconCode,
   IconDownload,
-  IconHelpCircle,
   IconLayoutSidebarLeftCollapse,
   IconMessageChatbot,
   IconPhotoPlus,
@@ -25,7 +24,6 @@ import SessionList from './components/session/SessionList'
 import { FORCE_ENABLE_DEV_PAGES } from './dev/devToolsConfig'
 import useNeedRoomForMacWinControls from './hooks/useNeedRoomForWinControls'
 import { useIsSmallScreen, useSidebarWidth } from './hooks/useScreenChange'
-import useVersion from './hooks/useVersion'
 import { navigateToSettings } from './modals/Settings'
 import { trackingEvent } from './packages/event'
 import { getSidebarModalSx } from './sidebar-drawer'
@@ -53,7 +51,6 @@ function setIosTextInteractionEnabled(enabled: boolean) {
 
 export default function Sidebar() {
   const { t } = useTranslation()
-  const versionHook = useVersion()
   const language = useLanguage()
   const navigate = useNavigate()
   const showSidebar = useUIStore((s) => s.showSidebar)
@@ -257,19 +254,6 @@ export default function Sidebar() {
                 p="xs"
               />
 
-              {!versionHook.isExceeded && (
-                <ActionIcon
-                  variant="transparent"
-                  color="chatbox-secondary"
-                  size={24}
-                  onClick={() => {
-                    navigate({ to: '/guide' })
-                    setShowSidebar(false)
-                  }}
-                >
-                  <ScalableIcon icon={IconHelpCircle} size={20} />
-                </ActionIcon>
-              )}
               <ActionIcon
                 variant="transparent"
                 color="chatbox-secondary"
@@ -309,17 +293,6 @@ export default function Sidebar() {
                 variant="light"
                 p="xs"
               />
-              {!versionHook.isExceeded && (
-                <NavLink
-                  c="chatbox-secondary"
-                  className="rounded"
-                  label={t('Help')}
-                  leftSection={<ScalableIcon icon={IconHelpCircle} size={20} />}
-                  onClick={() => navigate({ to: '/guide' })}
-                  variant="light"
-                  p="xs"
-                />
-              )}
               {FORCE_ENABLE_DEV_PAGES && (
                 <NavLink
                   c="chatbox-secondary"

@@ -34,16 +34,15 @@ function getBase64ImageSize(base64: string): Promise<{ width: number; height: nu
 export type PictureGalleryProps = {
   pictures: MessagePicture[]
   compact?: boolean
-  onReport?(picture: MessagePicture): void
 }
 
-export const PictureGallery = memo(({ pictures, compact, onReport }: PictureGalleryProps) => {
+export const PictureGallery = memo(({ pictures, compact }: PictureGalleryProps) => {
   const isSmallScreen = useIsSmallScreen()
   const imageHeight = compact ? (isSmallScreen ? 60 : 100) : isSmallScreen ? 100 : 200
 
   return (
     <Flex gap="sm" wrap="wrap">
-      <ImageViewer pictures={pictures} onReport={onReport}>
+      <ImageViewer pictures={pictures}>
         {pictures.map((picture) =>
           picture.storageKey ? (
             <ImageInStorageGalleryItem key={picture.storageKey} storageKey={picture.storageKey} height={imageHeight} />

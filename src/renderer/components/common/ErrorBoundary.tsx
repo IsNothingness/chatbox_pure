@@ -1,4 +1,3 @@
-import * as Sentry from '@sentry/react'
 import React from 'react'
 import { getLogger } from '../../lib/utils'
 import { router } from '../../router'
@@ -11,59 +10,43 @@ interface ErrorBoundaryProps {
   name?: string
 }
 
-/**
- * ErrorBoundary component using Sentry's built-in ErrorBoundary
- * Automatically reports errors to Sentry with proper context
- *
- * Implementation:
- * - ErrorBoundary errors are tagged with 'errorBoundary'
- * - These errors are 100% reported to Sentry (see sentry_init.ts)
- * - Other errors are subject to 10% sampling
- */
 export function ErrorBoundary({ children, fallback: CustomFallback, name = 'ErrorBoundary' }: ErrorBoundaryProps) {
   return (
-    <Sentry.ErrorBoundary
-      fallback={(fallbackProps) => {
-        const { error, resetError } = fallbackProps
-        const errorObj = error instanceof Error ? error : new Error(String(error))
-
-        // Log error locally
-        log.error(`${name} caught an error:`, errorObj)
-
-        // Use custom fallback if provided, otherwise use default
-        if (CustomFallback) {
-          return <CustomFallback error={errorObj} retry={resetError} />
-        }
-
-        return <DefaultErrorFallback error={errorObj} retry={resetError} />
-      }}
-      beforeCapture={(scope, error, componentStack) => {
-        // Add custom context to Sentry
-        scope.setTag('errorBoundary', name)
-        scope.setTag('component', 'ui')
-        scope.setTag('operation', name)
-        scope.setTag('error_domain', 'ui')
-        scope.setTag('error_operation', name)
-        scope.setTag('error_priority', 'critical')
-        scope.setTag('error_handled', 'true')
-        scope.setLevel('error')
-
-        // Add component stack information if available
-        if (typeof componentStack === 'string' && componentStack) {
-          scope.setContext('react', {
-            componentStack,
-            errorBoundary: name,
-          })
-        }
-
-        // Log error details locally
-        log.error(`${name} caught an error:`, error, componentStack)
-      }}
-      showDialog={false}
-    >
+    <LocalErrorBoundary fallback={CustomFallback} name={name}>
       {children}
-    </Sentry.ErrorBoundary>
+    </LocalErrorBoundary>
   )
+}
+
+class LocalErrorBoundary extends React.Component<
+  ErrorBoundaryProps,
+  {
+    error: Error | null
+  }
+> {
+  state = { error: null as Error | null }
+
+  static getDerivedStateFromError(error: unknown) {
+    return { error: error instanceof Error ? error : new Error(String(error)) }
+  }
+
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    log.error(`${this.props.name ?? 'ErrorBoundary'} caught an error:`, error, info.componentStack)
+  }
+
+  private reset = () => {
+    this.setState({ error: null })
+  }
+
+  render() {
+    if (!this.state.error) return this.props.children
+    const CustomFallback = this.props.fallback
+    return CustomFallback ? (
+      <CustomFallback error={this.state.error} retry={this.reset} />
+    ) : (
+      <DefaultErrorFallback error={this.state.error} retry={this.reset} />
+    )
+  }
 }
 
 interface DefaultErrorFallbackProps {
@@ -80,7 +63,7 @@ function DefaultErrorFallback({ error, retry }: DefaultErrorFallbackProps) {
         <div className="text-red-500 text-6xl mb-4">⚠️</div>
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Something went wrong!</h1>
         <p className="text-gray-600 dark:text-gray-400 mb-6">
-          The application encountered an unexpected error. This error has been automatically reported.
+          The application encountered an unexpected error. Details are available only in the local app logs.
         </p>
 
         <div className="space-y-3">
@@ -134,22 +117,4 @@ function DefaultErrorFallback({ error, retry }: DefaultErrorFallbackProps) {
   )
 }
 
-// Sentry Error Boundary (alternative approach using Sentry's built-in ErrorBoundary)
-export const SentryErrorBoundary = Sentry.withErrorBoundary(
-  ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  {
-    fallback: ({ error, resetError }) => (
-      <DefaultErrorFallback error={error instanceof Error ? error : new Error(String(error))} retry={resetError} />
-    ),
-    beforeCapture: (scope) => {
-      scope.setTag('errorBoundary', 'sentry')
-      scope.setTag('component', 'ui')
-      scope.setTag('operation', 'sentry')
-      scope.setTag('error_domain', 'ui')
-      scope.setTag('error_operation', 'sentry')
-      scope.setTag('error_priority', 'critical')
-      scope.setTag('error_handled', 'true')
-      scope.setLevel('error')
-    },
-  }
-)
+export const SentryErrorBoundary = ErrorBoundary

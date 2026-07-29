@@ -12,6 +12,8 @@ export interface LegacyBackupDataStore {
 export interface LegacyBackupImportOptions {
   storage: BackupStorage
   metaStorage: BackupMetaStorage
+  /** Remove every existing conversation before restoring the backup sessions. */
+  replaceExistingSessions?: boolean
   migrateData: (dataStore: LegacyBackupDataStore) => Promise<void>
   recoverSessionList: () => Promise<void>
 }
@@ -53,6 +55,13 @@ export async function importLegacyJsonBackup(
       return Promise.resolve()
     },
   })
+
+  if (options.replaceExistingSessions) {
+    const existingSessionKeys = (await options.storage.getAllKeys()).filter((key) => key.startsWith('session:'))
+    const existingSessionMeta = await options.metaStorage.getAllIncludingHidden()
+    for (const key of existingSessionKeys) await options.storage.removeItem(key)
+    for (const meta of existingSessionMeta) await options.metaStorage.delete(meta.id)
+  }
 
   const entriesToImport = Object.entries(importData).filter(
     ([key]) =>

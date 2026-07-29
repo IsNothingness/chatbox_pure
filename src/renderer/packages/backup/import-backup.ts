@@ -51,6 +51,8 @@ interface PreviousValue {
 export interface BackupImportOptions {
   storage: BackupStorage
   metaStorage: BackupMetaStorage
+  /** Remove every existing conversation before restoring the backup sessions. */
+  replaceExistingSessions?: boolean
   signal?: AbortSignal
   onProgress?: (progress: BackupProgress) => void
   rehydrateSession?: (
@@ -264,8 +266,13 @@ export async function importBackupArchive(file: File, options: BackupImportOptio
     options.onProgress?.({ phase: 'validating', current: 1, total: 1 })
 
     const existingStoreKeys = new Set(await options.storage.getAllKeys())
+    const existingSessionMeta = options.replaceExistingSessions ? await options.metaStorage.getAllIncludingHidden() : []
+    const existingSessionKeys = options.replaceExistingSessions
+      ? [...existingStoreKeys].filter((key) => key.startsWith('session:'))
+      : []
     const changedKeys = [
       ...manifest.sessions.map((session) => backupSessionStorageKey(session.id)),
+      ...existingSessionKeys,
       ...(manifest.data.settings ? [BackupStorageKey.Settings] : []),
       ...(manifest.data.copilots ? [BackupStorageKey.MyCopilots] : []),
       ...(manifest.data.sessionSettings
@@ -286,6 +293,19 @@ export async function importBackupArchive(file: File, options: BackupImportOptio
     }
 
     commitStarted = true
+    if (options.replaceExistingSessions) {
+      for (const meta of existingSessionMeta) {
+        previousMeta.set(meta.id, meta)
+        changedMetaIds.push(meta.id)
+      }
+      for (const key of existingSessionKeys) {
+        await options.storage.removeItem(key)
+      }
+      for (const meta of existingSessionMeta) {
+        await options.metaStorage.delete(meta.id)
+      }
+    }
+
     let completedResources = 0
     for (const plan of resourcePlans) {
       throwIfAborted(options.signal)
@@ -324,8 +344,10 @@ export async function importBackupArchive(file: File, options: BackupImportOptio
 
       const meta = restoreSessionMetaResourceKeys(descriptor.meta, resourceKeyMap)
       const existingMeta = await options.metaStorage.getById(session.id)
-      previousMeta.set(session.id, existingMeta)
-      changedMetaIds.push(session.id)
+      if (!previousMeta.has(session.id)) {
+        previousMeta.set(session.id, existingMeta)
+        changedMetaIds.push(session.id)
+      }
       if (existingMeta) await options.metaStorage.update(session.id, meta)
       else await options.metaStorage.create(meta)
       options.onProgress?.({

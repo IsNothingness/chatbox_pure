@@ -15,7 +15,6 @@ import {
   type NativeLicenseRequestOptions,
   validateNativeLicense,
 } from '../../shared/services/native-license'
-import { reportNativeContent } from '../../shared/services/native-report'
 import {
   type ChatboxAILicenseDetail,
   type ChatboxAIPlanType,
@@ -143,7 +142,7 @@ export async function checkNeedUpdate(version: string, os: string, config: Confi
     body: {
       uuid: config.uuid,
       os: os,
-      allowReportingAndTracking: settings.allowReportingAndTracking ? 1 : 0,
+      allowReportingAndTracking: 0,
     },
   })
   return !!res.need_update
@@ -711,16 +710,6 @@ export async function getChatboxAIModelList(params: { licenseKey?: string; langu
     throw error
   }
   return data.data
-}
-
-export async function reportContent(params: { id: string; type: string; details: string }) {
-  const afetch = await getAfetch()
-  await reportNativeContent({
-    ...params,
-    apiOrigin: getAPIOrigin(),
-    fetchFn: (input, init) => afetch(input, init),
-    headers: await getChatboxHeaders(),
-  })
 }
 
 const ProviderInfoResponseSchema = z.object({

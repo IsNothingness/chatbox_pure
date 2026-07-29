@@ -1,14 +1,6 @@
 import NiceModal from '@ebay/nice-modal-react'
 import { ActionIcon, Avatar, Box, Divider, Flex, ScrollArea, Space, Stack, Text } from '@mantine/core'
-import {
-  type AgentModeEntry,
-  type CopilotDetail,
-  createMessage,
-  type ImageSource,
-  ModelProviderEnum,
-  type Session,
-  type SessionSettings,
-} from '@shared/types'
+import type { CopilotDetail, ImageSource, Session, SessionSettings } from '@shared/types'
 import { IconChevronLeft, IconChevronRight, IconMessageCircle2Filled, IconX } from '@tabler/icons-react'
 import { createFileRoute, useRouterState } from '@tanstack/react-router'
 import { zodValidator } from '@tanstack/zod-adapter'
@@ -17,43 +9,20 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { v4 as uuidv4 } from 'uuid'
 import { z } from 'zod'
-import { trackJkClickEvent } from '@/analytics/jk'
-import { JK_EVENTS, JK_PAGE_NAMES } from '@/analytics/jk-events'
-import { ChatboxWelcomeCard } from '@/components/common/ChatboxWelcomeCard'
 import { ScalableIcon } from '@/components/common/ScalableIcon'
 import { ImageInStorage } from '@/components/Image'
 import InputBox, { type InputBoxPayload } from '@/components/InputBox/InputBox'
 import HomepageIcon from '@/components/icons/HomepageIcon'
 import Page from '@/components/layout/Page'
-import { getForceShowNewUserScenarioCardsFlag } from '@/dev/devToolsFlags'
 import { useMyCopilots, useRemoteCopilotsByCursor } from '@/hooks/useCopilots'
-import { useProviders } from '@/hooks/useProviders'
 import { useIsSmallScreen } from '@/hooks/useScreenChange'
-import useVersion from '@/hooks/useVersion'
 import * as remote from '@/packages/remote'
 import { router } from '@/router'
-import { useAuthInfoStore } from '@/stores/authInfoStore'
 import { createSession as createSessionStore } from '@/stores/chatStore'
-import { resolveChatboxLicenseDefaultModel } from '@/stores/defaultChatModel'
-import { getHasCompletedFirstSuccessfulChat } from '@/stores/firstSuccessfulChat'
-import { generate, submitNewUserMessage, switchCurrentSession } from '@/stores/sessionActions'
+import { submitNewUserMessage, switchCurrentSession } from '@/stores/sessionActions'
 import { initEmptyChatSession } from '@/stores/sessionHelpers'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useUIStore } from '@/stores/uiStore'
-import { getHomeWelcomeCardMode } from '@/utils/homeWelcomeCard'
-import { NewUserScenarioGrid } from './-new-user-scenarios/NewUserScenarioGrid'
-import { type NewUserScenario, newUserScenarios, resolveNewUserScenarioContent } from './-new-user-scenarios/scenarios'
-
-const scenarioAgentModeOff = {
-  value: 'off',
-  locked: false,
-  lockReason: null,
-} satisfies AgentModeEntry
-
-const firstChatScenarioDefaultModel = {
-  provider: ModelProviderEnum.ChatboxAI,
-  modelId: 'chatboxai-3.5',
-} satisfies Pick<SessionSettings, 'provider' | 'modelId'>
 
 export const Route = createFileRoute('/')({
   component: Index,
@@ -67,7 +36,7 @@ export const Route = createFileRoute('/')({
 })
 
 function Index() {
-  const { t, i18n } = useTranslation()
+  const { t } = useTranslation()
   const isSmallScreen = useIsSmallScreen()
 
   const newSessionState = useUIStore((s) => s.newSessionState)
@@ -84,32 +53,7 @@ function Index() {
     id: 'new',
     ...initEmptyChatSession(),
   })
-  const [hasCompletedFirstSuccessfulChat, setHasCompletedFirstSuccessfulChat] = useState<boolean | null>(null)
-  const [forceShowNewUserScenarioCards, setForceShowNewUserScenarioCards] = useState(
-    getForceShowNewUserScenarioCardsFlag
-  )
-  const hasUserSelectedModelRef = useRef(false)
-
-  const { providers } = useProviders()
   const defaultChatModel = useSettingsStore((s) => s.defaultChatModel)
-  const hasLicense = useSettingsStore((s) => Boolean(s.licenseKey))
-  const licenseKey = useSettingsStore((s) => s.licenseKey)
-  const licenseDetail = useSettingsStore((s) => s.licenseDetail)
-  const licensePlanName = useSettingsStore((s) => s.licensePlanName)
-  const hasExpiredLicense = useSettingsStore((s) => s.hasExpiredLicense)
-  const isLoggedIn = useAuthInfoStore((s) => Boolean(s.accessToken && s.refreshToken))
-  const { isExceeded, isExceededResolved } = useVersion()
-  const welcomeCardMode = useMemo(
-    () =>
-      getHomeWelcomeCardMode({
-        providerCount: providers.length,
-        isLoggedIn,
-        hasLicense,
-        hasExpiredLicense,
-        hideForStoreReview: isExceeded || !isExceededResolved,
-      }),
-    [providers.length, isLoggedIn, hasLicense, hasExpiredLicense, isExceeded, isExceededResolved]
-  )
 
   const selectedModel = useMemo(() => {
     if (session.settings?.provider && session.settings?.modelId) {
@@ -121,85 +65,23 @@ function Index() {
   }, [session.settings?.provider, session.settings?.modelId])
 
   useEffect(() => {
-    let cancelled = false
-
-    setForceShowNewUserScenarioCards(getForceShowNewUserScenarioCardsFlag())
-
-    getHasCompletedFirstSuccessfulChat()
-      .then((completed) => {
-        if (!cancelled) {
-          setHasCompletedFirstSuccessfulChat(completed)
-        }
-      })
-      .catch((error) => {
-        console.warn('[new-user-scenarios] failed to resolve first successful chat state:', error)
-        if (!cancelled) {
-          setHasCompletedFirstSuccessfulChat(true)
-        }
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  useEffect(() => {
     setSession((old) => {
-      if (
-        hasCompletedFirstSuccessfulChat === false &&
-        isLoggedIn &&
-        !session.copilotId &&
-        !hasUserSelectedModelRef.current
-      ) {
-        if (
-          old.settings?.provider === firstChatScenarioDefaultModel.provider &&
-          old.settings?.modelId === firstChatScenarioDefaultModel.modelId
-        ) {
-          return old
-        }
-        return {
-          ...old,
-          settings: {
-            ...(old.settings || {}),
-            ...firstChatScenarioDefaultModel,
-          },
-        }
-      }
       if (old.settings?.provider && old.settings?.modelId) {
         return old
       }
-      const defaultModel = defaultChatModel
-        ? {
-            provider: defaultChatModel.provider,
-            modelId: defaultChatModel.model,
-          }
-        : resolveChatboxLicenseDefaultModel({
-            licenseKey,
-            hasExpiredLicense,
-            licenseDetail,
-            licensePlanName,
-          })
-      if (!defaultModel) {
+      if (!defaultChatModel) {
         return old
       }
       return {
         ...old,
         settings: {
           ...(old.settings || {}),
-          ...defaultModel,
+          provider: defaultChatModel.provider,
+          modelId: defaultChatModel.model,
         },
       }
     })
-  }, [
-    defaultChatModel,
-    hasCompletedFirstSuccessfulChat,
-    hasExpiredLicense,
-    isLoggedIn,
-    licenseDetail,
-    licenseKey,
-    licensePlanName,
-    session.copilotId,
-  ])
+  }, [defaultChatModel])
 
   const { copilots: myCopilots } = useMyCopilots()
   const { copilots: remoteCopilots } = useRemoteCopilotsByCursor({ limit: 10 })
@@ -275,7 +157,6 @@ function Index() {
       threadName?: string
       messages?: Session['messages']
       settingsPatch?: Partial<SessionSettings>
-      settingsOverride?: Partial<SessionSettings>
     }) => {
       const newSession = await createSessionStore({
         name: options?.name ?? session.name,
@@ -295,7 +176,6 @@ function Index() {
             ? { workingDirectories: newSessionState.workingDirectories }
             : {}),
           ...(newSessionState.agentFullAccess ? { agentFullAccess: true } : {}),
-          ...options?.settingsOverride,
         },
       })
 
@@ -365,34 +245,7 @@ function Index() {
     [createPersistedChatSession]
   )
 
-  const handleScenarioSelect = useCallback(
-    async (scenario: NewUserScenario) => {
-      const scenarioContent = resolveNewUserScenarioContent(scenario, i18n.language)
-      trackJkClickEvent(JK_EVENTS.LEAD_CHAT_CARD_CLICK, {
-        pageName: JK_PAGE_NAMES.CHAT_PAGE,
-        content: t(scenario.titleKey),
-        contentType: session.settings?.modelId ?? firstChatScenarioDefaultModel.modelId,
-      })
-      const assistantMessage = createMessage('assistant', '')
-      assistantMessage.generating = true
-      const newSession = await createPersistedChatSession({
-        name: scenarioContent.sessionTitle,
-        threadName: scenarioContent.sessionTitle,
-        messages: [
-          createMessage('system', scenarioContent.systemPrompt),
-          createMessage('user', scenarioContent.firstUserMessage),
-          assistantMessage,
-        ],
-        settingsOverride: { agentMode: scenarioAgentModeOff },
-      })
-
-      void generate(newSession.id, assistantMessage, { operationType: 'send_message' })
-    },
-    [createPersistedChatSession, i18n.language, session.settings?.modelId, t]
-  )
-
   const onSelectModel = useCallback((p: string, m: string) => {
-    hasUserSelectedModelRef.current = true
     setSession((old) => ({
       ...old,
       settings: {
@@ -417,27 +270,16 @@ function Index() {
     return true
   }, [session])
 
-  const showNewUserScenarios =
-    (forceShowNewUserScenarioCards || (hasCompletedFirstSuccessfulChat === false && isLoggedIn)) && !session.copilotId
-
   return (
     <Page title="">
       <div className="p-0 flex flex-col h-full min-h-0 overflow-hidden">
-        <div
-          className={clsx('min-h-0 flex-1 overflow-y-auto', welcomeCardMode !== 'none' ? 'pb-36 sm:pb-32' : 'pb-md')}
-        >
-          {showNewUserScenarios ? (
-            <Stack justify="center" className="min-h-full" py="xl">
-              <NewUserScenarioGrid scenarios={newUserScenarios} onSelect={handleScenarioSelect} />
-            </Stack>
-          ) : (
-            <Stack align="center" justify="center" gap="sm" className="min-h-full">
-              <HomepageIcon className="h-8" />
-              <Text fw="600" size={isSmallScreen ? 'sm' : 'md'}>
-                {t('What can I help you with today?')}
-              </Text>
-            </Stack>
-          )}
+        <div className="min-h-0 flex-1 overflow-y-auto pb-md">
+          <Stack align="center" justify="center" gap="sm" className="min-h-full">
+            <HomepageIcon className="h-8" />
+            <Text fw="600" size={isSmallScreen ? 'sm' : 'md'}>
+              {t('What can I help you with today?')}
+            </Text>
+          </Stack>
         </div>
 
         <Stack gap="sm" className="shrink-0">
@@ -480,23 +322,6 @@ function Index() {
           )}
 
           <Box className="relative">
-            {welcomeCardMode !== 'none' && (
-              <Box
-                className="pointer-events-none absolute left-0 right-0 z-10"
-                style={{ bottom: '100%' }}
-                px="sm"
-                mb="sm"
-              >
-                <Box className={widthFull ? 'w-full' : 'w-full max-w-4xl mx-auto'}>
-                  <ChatboxWelcomeCard
-                    mode={welcomeCardMode}
-                    pageName={JK_PAGE_NAMES.CHAT_PAGE}
-                    className="pointer-events-auto w-full"
-                  />
-                </Box>
-              </Box>
-            )}
-
             <InputBox
               sessionType="chat"
               sessionId="new"

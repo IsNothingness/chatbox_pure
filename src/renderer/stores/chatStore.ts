@@ -18,7 +18,7 @@ import {
 import { type InfiniteData, useInfiniteQuery, useQuery } from '@tanstack/react-query'
 import compact from 'lodash/compact'
 import isEmpty from 'lodash/isEmpty'
-import { useMemo } from 'react'
+import { useMemo, useSyncExternalStore } from 'react'
 import { v4 as uuidv4 } from 'uuid'
 import i18n from '@/i18n'
 import platform from '@/platform'
@@ -52,6 +52,29 @@ export const QueryKeys = {
   ArchivedChatSessionsList: ['archived-chat-sessions-list'],
   ChatSession: (id: string) => ['chat-session', id],
   ChatSessionSettings: (id: string) => ['chat-session-settings', id],
+}
+
+let sessionListRevision = 0
+const sessionListRevisionListeners = new Set<() => void>()
+
+function notifySessionListChanged() {
+  sessionListRevision += 1
+  for (const listener of sessionListRevisionListeners) {
+    listener()
+  }
+}
+
+export function useSessionListRevision() {
+  return useSyncExternalStore(
+    (listener) => {
+      sessionListRevisionListeners.add(listener)
+      return () => {
+        sessionListRevisionListeners.delete(listener)
+      }
+    },
+    () => sessionListRevision,
+    () => sessionListRevision
+  )
 }
 
 // MARK: session meta storage
@@ -191,6 +214,7 @@ export function useArchivedSessionList() {
  * preserving the nextCursor for further pagination.
  */
 export function updateSessionListData(updater: (items: SessionMetaRecord[]) => SessionMetaRecord[]) {
+  notifySessionListChanged()
   queryClient.setQueryData<InfiniteSessionData>(QueryKeys.ChatSessionsList, (old) => {
     if (!old || !old.pages.length) return old
     const allItems = old.pages.flatMap((p) => p.items)
@@ -217,6 +241,7 @@ export async function refreshSessionListCache() {
     pages: [firstPage],
     pageParams: [0],
   })
+  notifySessionListChanged()
 }
 
 async function refreshArchivedSessionListCache() {

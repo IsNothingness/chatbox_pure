@@ -87,7 +87,7 @@ const MessageNavigationButton = ({ icon, ...others }: { icon: React.ReactElement
 
 export const ScrollToBottomButton = ({ onClick, style }: { onClick?(): void; style?: CSSProperties }) => {
   return (
-    <Box className="absolute bottom-5 right-2">
+    <Box className="mobile-scroll-to-bottom-button absolute bottom-5 right-2">
       <Button
         w={38}
         h={38}

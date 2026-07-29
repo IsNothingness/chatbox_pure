@@ -30,7 +30,6 @@ import { createSandboxProvider } from '@/sandbox'
 import storage from '@/storage'
 import { StorageKeyGenerator } from '@/storage/StoreStorage'
 import * as chatStore from '../chatStore'
-import { markFirstSuccessfulChatCompleted } from '../firstSuccessfulChat'
 import * as settingActions from '../settingActions'
 import { settingsStore } from '../settingsStore'
 import { uiStore } from '../uiStore'
@@ -716,9 +715,6 @@ export async function orchestrateGeneration(
     }
 
     await persistStreamingMessage(sessionId, targetMsg, { refreshCounting: true })
-    if (options?.operationType === 'send_message') {
-      markFirstSuccessfulChatCompleted()
-    }
     appleAppStore.tickAfterMessageGenerated()
   } catch (err: unknown) {
     const pause = getToolCallPause(err)

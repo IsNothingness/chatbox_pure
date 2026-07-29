@@ -112,6 +112,32 @@ describe('legacy JSON backup import', () => {
     expect(recoverSessionList).toHaveBeenCalledOnce()
   })
 
+  it('removes existing conversations before importing when replacement is requested', async () => {
+    const storage = new LegacyMemoryStorage()
+    const metaStorage = new LegacyMemoryMetaStorage()
+    storage.values.set('session:existing', { id: 'existing', name: 'Existing', messages: [] })
+    metaStorage.records.set('existing', { id: 'existing', name: 'Existing', sortOrder: 1, createdAt: 1 })
+
+    await importLegacyJsonBackup(
+      asJsonFile({
+        'session:imported': { id: 'imported', name: 'Imported', messages: [] },
+        'chat-sessions-list': [{ id: 'imported', name: 'Imported', sortOrder: 2, createdAt: 2 }],
+      }),
+      {
+        storage,
+        metaStorage,
+        replaceExistingSessions: true,
+        recoverSessionList: () => Promise.resolve(),
+        migrateData: () => Promise.resolve(),
+      }
+    )
+
+    expect(storage.values.has('session:existing')).toBe(false)
+    expect(metaStorage.records.has('existing')).toBe(false)
+    expect(storage.values.get('session:imported')).toMatchObject({ id: 'imported' })
+    expect([...metaStorage.records.keys()]).toEqual(['imported'])
+  })
+
   it('rejects non-object JSON backups', async () => {
     await expect(
       importLegacyJsonBackup(asJsonFile([]), {

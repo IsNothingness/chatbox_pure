@@ -1,4 +1,3 @@
-import * as Sentry from '@sentry/react'
 import { isExpectedGenerationError } from '@shared/models/error-classification'
 import platform from '@/platform'
 import { trackEvent } from '@/utils/track'
@@ -171,22 +170,9 @@ export function trackAgentModeFullAccessBypass(props: { tool: 'user_exec' | 'wri
 // user-environment noise, not defects, and their messages can echo request content.
 export { isExpectedGenerationError }
 
-function sanitizeProviderTag(provider: string): string {
-  return provider.startsWith('custom-provider-') ? 'custom' : provider
-}
-
-// MCP tool names embed the user-entered server name (`mcp__<server>__<tool>`); drop it.
-function sanitizeToolNameTag(toolName: string): string {
-  const parts = toolName.split('__')
-  if (parts[0] === 'mcp' && parts.length >= 3) {
-    return `mcp__${parts.slice(2).join('__')}`
-  }
-  return toolName
-}
-
 export function captureAgentModeException(
-  error: unknown,
-  context: {
+  _error: unknown,
+  _context: {
     operation:
       | 'suggestion'
       | 'suggestion_model'
@@ -203,24 +189,5 @@ export function captureAgentModeException(
     operationType?: string
   }
 ) {
-  if (isExpectedGenerationError(error)) return
-  const exception = error instanceof Error ? error : new Error(`${error}`)
-  const customProvider = context.provider?.startsWith('custom-provider-') === true
-  Sentry.withScope((scope) => {
-    scope.setTag('component', 'agent-mode')
-    scope.setTag('operation', context.operation)
-    scope.setTag('error_domain', 'agent-mode')
-    scope.setTag('error_operation', context.operation)
-    scope.setTag('error_priority', 'high')
-    scope.setTag('error_handled', 'true')
-    if (context.provider) scope.setTag('provider', sanitizeProviderTag(context.provider))
-    // Custom-provider model IDs are user-typed free text; skip them.
-    if (context.model && !customProvider) scope.setTag('model', context.model)
-    if (context.agentMode) scope.setTag('agent_mode', context.agentMode)
-    if (context.fullAccess !== undefined) scope.setTag('full_access', toBooleanString(context.fullAccess))
-    if (context.toolName) scope.setTag('tool_name', sanitizeToolNameTag(context.toolName))
-    if (context.pauseType) scope.setTag('pause_type', context.pauseType)
-    if (context.operationType) scope.setTag('operation_type', context.operationType)
-    Sentry.captureException(exception)
-  })
+  // Pure builds intentionally keep handled errors local.
 }

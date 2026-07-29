@@ -14,7 +14,13 @@ export const useProviders = () => {
   const favoritedModelsSetting = useSettingsStore((state) => state.favoritedModels)
   const providerSettingsMap = useSettingsStore((state) => state.providers)
 
-  const allProviderBaseInfos = useMemo(() => [...SystemProviders(), ...(customProviders || [])], [customProviders])
+  const allProviderBaseInfos = useMemo(
+    () =>
+      [...SystemProviders(), ...(customProviders || [])].filter(
+        (provider) => provider.id !== ModelProviderEnum.ChatboxAI
+      ),
+    [customProviders]
+  )
   const providers = useMemo(
     () =>
       allProviderBaseInfos

@@ -31,7 +31,7 @@ import { ThemeProvider } from '@mui/material/styles'
 import { Theme } from '@shared/types'
 import { useQuery } from '@tanstack/react-query'
 import { createRootRoute, Outlet, useLocation } from '@tanstack/react-router'
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo } from 'react'
 import { trackJkViewEvent } from '@/analytics/jk'
 import { JK_EVENTS, JK_PAGE_NAMES } from '@/analytics/jk-events'
 import { ErrorBoundary } from '@/components/common/ErrorBoundary'
@@ -55,10 +55,8 @@ import { router } from '@/router'
 import Sidebar from '@/Sidebar'
 import storage from '@/storage'
 import { getSession, useSession } from '@/stores/chatStore'
-import { initOnboardingStore, onboardingStore } from '@/stores/onboardingStore'
 import * as premiumActions from '@/stores/premiumActions'
-import * as settingActions from '@/stores/settingActions'
-import { initSettingsStore, settingsStore, useLanguage, useSettingsStore, useTheme } from '@/stores/settingsStore'
+import { settingsStore, useLanguage, useSettingsStore, useTheme } from '@/stores/settingsStore'
 import { useUIStore } from '@/stores/uiStore'
 import { blobToDataUrl } from './image-creator/-components/constants'
 
@@ -132,45 +130,9 @@ function Root() {
   const location = useLocation()
   const spellCheck = useSettingsStore((state) => state.spellCheck)
   const language = useLanguage()
-  const initialized = useRef(false)
-
   useEffect(() => {
-    if (initialized.current) {
-      return
-    }
-    // biome-ignore lint/nursery/noFloatingPromises: inline call
-    ;(async () => {
-      // Wait for stores to hydrate from persistent storage
-      await Promise.all([initSettingsStore(), initOnboardingStore()])
-      void prefetchModelRegistry()
-
-      // Skip guide-related checks if already on guide, dev tools, or settings/mcp page
-      if (
-        location.pathname === '/guide' ||
-        location.pathname.startsWith('/dev') ||
-        location.pathname === '/settings/mcp'
-      ) {
-        initialized.current = true
-        return
-      }
-
-      initialized.current = true
-
-      // Check if user needs onboarding guide
-      // Conditions: not completed onboarding AND no valid config
-      const onboardingCompleted = onboardingStore.getState().completed
-      const needsSetup = settingActions.needEditSetting()
-
-      // Auto-navigate to guide for new users who need setup
-      if (!onboardingCompleted && needsSetup) {
-        router.navigate({ to: '/guide', replace: true })
-        return
-      }
-
-      // 是否需要弹出关于窗口（更新后首次启动）
-      // 目前仅在桌面版本更新后首次启动、且网络环境为"外网"的情况下才自动弹窗
-    })()
-  }, [location.pathname])
+    void prefetchModelRegistry()
+  }, [])
 
   const showSidebar = useUIStore((s) => s.showSidebar)
   const sidebarWidth = useSidebarWidth()
@@ -235,8 +197,6 @@ function Root() {
       pageName = JK_PAGE_NAMES.COPILOTS_PAGE
     } else if (pathname.startsWith('/settings')) {
       pageName = JK_PAGE_NAMES.SETTING_PAGE
-    } else if (pathname.startsWith('/guide')) {
-      pageName = JK_PAGE_NAMES.HELP_PAGE
     } else if (pathname === '/about') {
       pageName = JK_PAGE_NAMES.ABOUT_PAGE
     }
@@ -313,7 +273,6 @@ function Root() {
       <PictureDialog />
       {/* 似乎是从后端拉一个弹窗的配置 */}
       {/* 手机端举报内容 */}
-      {/* <ReportContentDialog /> */}
       {/* 搜索 */}
       <SearchDialog />
       <DesktopDownloadReminder />

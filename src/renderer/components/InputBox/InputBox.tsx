@@ -221,6 +221,7 @@ const InputBox = forwardRef<InputBoxRef, InputBoxProps>(
     const { t } = useTranslation()
     const navigate = useNavigate()
     const isSmallScreen = useIsSmallScreen()
+    const mobileDockShellRef = useRef<HTMLDivElement | null>(null)
     const toolbarIconSize = isSmallScreen ? 22 : 18
     const { height: viewportHeight } = useViewportSize()
     const pasteLongTextAsAFile = useSettingsStore((state) => state.pasteLongTextAsAFile)
@@ -230,6 +231,23 @@ const InputBox = forwardRef<InputBoxRef, InputBoxProps>(
 
     const currentSessionId = sessionId
     const isNewSession = currentSessionId === 'new'
+
+    useEffect(() => {
+      const element = mobileDockShellRef.current
+      if (!isSmallScreen || !element || typeof ResizeObserver === 'undefined') {
+        return
+      }
+      const updateDockHeight = () => {
+        document.documentElement.style.setProperty('--mobile-input-dock-height', `${element.offsetHeight}px`)
+      }
+      updateDockHeight()
+      const observer = new ResizeObserver(updateDockHeight)
+      observer.observe(element)
+      return () => {
+        observer.disconnect()
+        document.documentElement.style.removeProperty('--mobile-input-dock-height')
+      }
+    }, [isSmallScreen])
 
     // Session-level web browsing mode
     const sessionWebBrowsingMap = useUIStore((s) => s.sessionWebBrowsingMap)
@@ -1332,14 +1350,22 @@ const InputBox = forwardRef<InputBoxRef, InputBoxProps>(
     }
 
     return (
-      <Box pt={0} pb={isSmallScreen ? 'md' : 'sm'} px="sm" id={dom.InputBoxID} {...getRootProps()}>
+      <Box
+        ref={mobileDockShellRef}
+        className={cn(isSmallScreen && 'mobile-input-dock-shell')}
+        pt={0}
+        pb={isSmallScreen ? 'md' : 'sm'}
+        px="sm"
+        id={dom.InputBoxID}
+        {...getRootProps()}
+      >
         <input className="hidden" {...getInputProps()} />
         <Stack className={cn(widthFull ? 'w-full' : 'max-w-4xl mx-auto')} gap="xs">
           {currentSessionId && <CompactionStatus sessionId={currentSessionId} />}
           <Stack
             className={cn(
-              'relative rounded-md bg-chatbox-background-secondary justify-between px-3 py-2',
-              !isSmallScreen && 'min-h-[92px]'
+              'relative rounded-md justify-between px-3 py-2',
+              isSmallScreen ? 'mobile-input-dock' : 'min-h-[92px] bg-chatbox-background-secondary'
             )}
             style={{ border: '1px solid var(--chatbox-border-primary)' }}
             gap="xs"

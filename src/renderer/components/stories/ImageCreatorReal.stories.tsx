@@ -124,7 +124,7 @@ export const GeneratedImagesGalleryStates: StoryObj = {
         title="GeneratedImagesGallery"
         description="Actual generated image gallery with dynamic dimensions, preview affordance, use-as-reference, download, and report action wiring."
       />
-      <GeneratedImagesGallery images={sampleImages} onUseAsReference={() => undefined} onReport={() => undefined} />
+      <GeneratedImagesGallery images={sampleImages} onUseAsReference={() => undefined} />
     </Stack>
   ),
 }

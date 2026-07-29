@@ -92,6 +92,7 @@ export interface MessageListRef {
 export interface MessageListProps {
   className?: string
   currentSession: Session
+  hasFloatingInputDock?: boolean
 }
 
 type MessageRenderItem =
@@ -507,6 +508,13 @@ const MessageList = forwardRef<MessageListRef, MessageListProps>((props, ref) =>
                   initialTopMostItemIndex: renderItems.length - 1,
                 })}
             increaseViewportBy={{ top: 2000, bottom: 2000 }}
+            components={
+              props.hasFloatingInputDock
+                ? {
+                    Footer: () => <div aria-hidden className="mobile-message-list-dock-spacer" />,
+                  }
+                : undefined
+            }
             itemContent={(index, item) => {
               const itemClassName = widthFull ? 'w-full' : 'max-w-4xl mx-auto'
               const isFirstItem = index === 0

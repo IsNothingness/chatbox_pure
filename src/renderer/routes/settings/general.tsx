@@ -1,3 +1,4 @@
+import NiceModal from '@ebay/nice-modal-react'
 import {
   Alert,
   Button,
@@ -179,24 +180,6 @@ export function RouteComponent() {
       <ExportLogsSection />
 
       <Divider />
-
-      {/* Error Reporting */}
-      <Stack gap="md">
-        <Stack gap="xxs">
-          <Title order={5}>{t('Error Reporting')}</Title>
-          <Text c="chatbox-tertiary">
-            {t(
-              'Chatbox respects your privacy and only uploads anonymous error data and events when necessary. You can change your preferences at any time in the settings.'
-            )}
-          </Text>
-        </Stack>
-
-        <Checkbox
-          label={t('Enable optional anonymous reporting of crash and event data')}
-          checked={settings.allowReportingAndTracking}
-          onChange={(e) => setSettings({ allowReportingAndTracking: e.target.checked })}
-        />
-      </Stack>
 
       {/* others */}
       {platform.type === 'desktop' && (
@@ -483,6 +466,18 @@ const ImportExportDataSection = () => {
 
   const onImport = async (file: File | null) => {
     if (isLoading || !file) return
+    const replaceExistingSessions =
+      (await NiceModal.show('confirm', {
+        title: String(t('Replace existing conversations?')),
+        message: String(
+          t(
+            'Clear all existing conversations before importing? Choose Keep and merge to preserve the current conversations.'
+          )
+        ),
+        confirmText: String(t('Clear and import')),
+        cancelText: String(t('Keep and merge')),
+        danger: true,
+      })) === true
     const abortController = new AbortController()
     operationAbortRef.current = abortController
     setIsImporting(true)
@@ -498,6 +493,7 @@ const ImportExportDataSection = () => {
           signal: abortController.signal,
           onProgress: setProgress,
           rehydrateSession: rehydrateImportedSession,
+          replaceExistingSessions,
         })
         if (result.warnings.length > 0) {
           const warningSummary = result.warnings
@@ -526,6 +522,7 @@ const ImportExportDataSection = () => {
           recoverSessionList: async () => {
             await recoverSessionList()
           },
+          replaceExistingSessions,
         })
       }
       await platform.relaunch()

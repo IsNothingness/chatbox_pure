@@ -200,6 +200,45 @@ describe('ZIP backup round trip', () => {
     expect(destinationMeta.records.size).toBe(2)
   })
 
+  it('replaces all existing conversations when requested', async () => {
+    const source = new MemoryStorage()
+    const sourceMeta = new MemoryMetaStorage()
+    const importedSession = createSession('imported')
+    source.values.set(backupSessionStorageKey(importedSession.id), importedSession)
+    sourceMeta.records.set(importedSession.id, createMeta(importedSession, 1))
+    source.blobs.set('picture:shared', 'data:image/png;base64,AAECAw==')
+
+    const chunks: Uint8Array[] = []
+    await exportBackupArchive({
+      exportItems: ['conversations'],
+      includeKeys: false,
+      storage: source,
+      metaStorage: sourceMeta,
+      application: { version: 'test', platform: 'test' },
+      writeArchive: async (dataCallback) => {
+        for await (const chunk of dataCallback()) chunks.push(chunk)
+        return { boundedMemory: true }
+      },
+    })
+
+    const destination = new MemoryStorage()
+    const destinationMeta = new MemoryMetaStorage()
+    const existingSession = createSession('existing')
+    destination.values.set(backupSessionStorageKey(existingSession.id), existingSession)
+    destinationMeta.records.set(existingSession.id, createMeta(existingSession, 2))
+
+    await importBackupArchive(new File([Uint8Array.from(combine(chunks)).buffer], 'replace.zip'), {
+      storage: destination,
+      metaStorage: destinationMeta,
+      replaceExistingSessions: true,
+    })
+
+    expect(destination.values.has(backupSessionStorageKey('existing'))).toBe(false)
+    expect(destinationMeta.records.has('existing')).toBe(false)
+    expect(destination.values.get(backupSessionStorageKey('imported'))).toMatchObject({ id: 'imported' })
+    expect([...destinationMeta.records.keys()]).toEqual(['imported'])
+  })
+
   it('round-trips global settings, copilots, and session settings while pruning unavailable images', async () => {
     const source = new MemoryStorage()
     const sourceSettings = {

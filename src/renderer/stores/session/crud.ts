@@ -149,7 +149,10 @@ export function switchCurrentSession(sessionId: string) {
  */
 export async function reorderSessions(oldIndex: number, newIndex: number) {
   console.debug('sessionActions', 'reorderSessions', oldIndex, newIndex)
-  const sessions = await chatStore.listSessionsMeta()
+  // Reordering may originate from a sparse, cold-page-backed list. Read the
+  // complete metadata order for this one operation so absolute indexes and
+  // neighboring sort orders remain correct even when most pages are unloaded.
+  const sessions = await chatStore.listAllSessionsMeta()
   const movedSession = sessions[oldIndex]
   if (!movedSession || oldIndex === newIndex) return
   const reorderedSessions = [...sessions]

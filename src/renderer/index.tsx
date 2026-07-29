@@ -16,32 +16,23 @@ import './static/globals.css'
 import './static/index.css'
 import { initLogAtom, migrationProcessAtom } from './stores/atoms/utilAtoms'
 import * as migration from './stores/migration'
-import { getMigrationErrorContext } from './stores/migration-error'
 import queryClient from './stores/queryClient'
-import { CHATBOX_BUILD_PLATFORM, CHATBOX_BUILD_TARGET } from './variables'
+import { CHATBOX_BUILD_TARGET } from './variables'
 
 const log = getLogger('index')
 
 // 按需加载 polyfill
 import './setup/load_polyfill'
 
-// GA4 初始化
-import './setup/ga_init'
-
 // 引入保护代码
 import './setup/protect'
 import { QueryClientProvider } from '@tanstack/react-query'
-import { initJkTracking } from './setup/jk_analytics_init'
-import { initPlausibleTracking } from './setup/plausible_init'
-import { initSentry } from './setup/sentry_init'
 import { initSessionAttachmentRagMaintenance } from './setup/session_attachment_rag_maintenance'
 import { initLastUsedModelStore } from './stores/lastUsedModelStore'
-import { initOnboardingStore } from './stores/onboardingStore'
 import { initLoginLicenseStateReconciliation } from './stores/premiumActions'
 import { initRecentDirectoriesStore } from './stores/recentDirectoriesStore'
 import { initSettingsStore } from './stores/settingsStore'
 import { initUpdateManager } from './stores/updateStore'
-import { reportError } from './utils/sentry'
 
 // 开发环境下引入错误测试工具
 // if (process.env.NODE_ENV === 'development') {
@@ -51,41 +42,21 @@ import { reportError } from './utils/sentry'
 // Token estimation system initialization (runs in all environments)
 import('./setup/token_estimation_init')
 
-// 引入移动端安全区域代码，主要为了解决异形屏幕的问题
-if (CHATBOX_BUILD_TARGET === 'mobile_app' && CHATBOX_BUILD_PLATFORM === 'ios') {
-  import('./setup/mobile_safe_area')
+// Keep controls clear of system bars and display cutouts on every mobile platform.
+if (CHATBOX_BUILD_TARGET === 'mobile_app') {
+  void import('./setup/mobile_safe_area')
 }
 
 // ==========执行初始化==============
 async function initializeApp() {
   log.info('initializeApp')
 
-  let migrationError: unknown
   try {
     // 数据迁移
     await migration.migrate()
     log.info('migrate done')
   } catch (e) {
     log.error('migrate error', e)
-    migrationError = e
-  }
-
-  // Migrate persisted consent before any settings-backed telemetry initializes.
-  await initSentry()
-  void initPlausibleTracking((onResolved) => {
-    router.subscribe('onResolved', ({ hrefChanged }) => onResolved(hrefChanged))
-  })
-  void initJkTracking()
-
-  if (migrationError !== undefined) {
-    const migrationErrorContext = getMigrationErrorContext(migrationError)
-    reportError(migrationError, {
-      domain: 'storage',
-      extras: migrationErrorContext ? { ...migrationErrorContext } : undefined,
-      operation: 'migration',
-      priority: 'high',
-      tags: migrationErrorContext ? { configVersion: migrationErrorContext.configVersion } : undefined,
-    })
   }
 
   // 最后执行 storage 清理，清理不 block 进入UI
@@ -149,24 +120,13 @@ const tid = setTimeout(() => {
 initializeApp()
   .catch((e) => {
     // 初始化中的各个步骤已经捕获了错误，这里防止未来添加未捕获的逻辑
-    reportError(e, {
-      domain: 'application',
-      handled: false,
-      operation: 'app_initialization',
-      priority: 'critical',
-    })
     log.error('initializeApp error', e)
   })
   .finally(async () => {
     clearTimeout(tid)
 
     // 等待settings和onboarding初始化完成，避免闪屏
-    const [settings] = await Promise.all([
-      initSettingsStore(),
-      initLastUsedModelStore(),
-      initOnboardingStore(),
-      initRecentDirectoriesStore(),
-    ])
+    const [settings] = await Promise.all([initSettingsStore(), initLastUsedModelStore(), initRecentDirectoriesStore()])
 
     i18n.changeLanguage(settings.language)
     initLoginLicenseStateReconciliation()

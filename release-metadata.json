@@ -5,7 +5,9 @@
   "releasePage": "https://github.com/IsNothingness/chatbox_pure/releases/latest",
   "packages": {
     "android": {
-      "url": "https://github.com/IsNothingness/chatbox_pure/releases/download/v1.0.0/ChatBox-Pure-1.0.0.apk"
+      "url": "https://github.com/IsNothingness/chatbox_pure/releases/download/v1.0.0/ChatBox-Pure-1.0.0.apk",
+      "sha256": "a1a47ca08b194d72fd2c356faf4d9ad1c862f3cdfb9f2decd4ef514db1e9ee99",
+      "size": 32944008
     },
     "windows-x64": {
       "url": "https://github.com/IsNothingness/chatbox_pure/releases/download/v1.0.0/ChatBox-Pure-1.0.0-x64-Setup.exe"

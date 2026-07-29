@@ -14,6 +14,7 @@ import Header from '@/components/layout/Header'
 import Page from '@/components/layout/Page'
 import ThreadHistoryDrawer from '@/components/session/ThreadHistoryDrawer'
 import { useProviders } from '@/hooks/useProviders'
+import { useIsSmallScreen } from '@/hooks/useScreenChange'
 import useVersion from '@/hooks/useVersion'
 import { defaultSessionsForCN, defaultSessionsForEN } from '@/packages/initial_data'
 import * as remote from '@/packages/remote'
@@ -40,6 +41,7 @@ function RouteComponent() {
   const { t } = useTranslation()
   const { sessionId: currentSessionId } = Route.useParams()
   const navigate = useNavigate()
+  const isSmallScreen = useIsSmallScreen()
   const { session: currentSession, isFetching } = useSession(currentSessionId)
   const { providers } = useProviders()
   const licenseKey = useSettingsStore((s) => s.licenseKey)
@@ -220,15 +222,22 @@ function RouteComponent() {
       modelId: currentSessionWithDefaultModel.settings.modelId,
     }
   }, [currentSessionWithDefaultModel?.settings?.provider, currentSessionWithDefaultModel?.settings?.modelId])
+  const hasFloatingInputDock = isSmallScreen && currentSession?.type !== 'picture'
 
   return currentSession ? (
-    <div className="flex flex-col h-full">
+    <div className="relative flex flex-col h-full overflow-hidden">
       <Header session={currentSession} />
 
       {/* MessageList 设置 key，确保每个 session 对应新的 MessageList 实例 */}
-      <MessageList ref={messageListRef} key={`message-list${currentSessionId}`} currentSession={currentSession} />
+      <MessageList
+        ref={messageListRef}
+        key={`message-list${currentSessionId}`}
+        currentSession={currentSession}
+        className={hasFloatingInputDock ? 'mobile-message-list-with-floating-dock' : undefined}
+        hasFloatingInputDock={hasFloatingInputDock}
+      />
 
-      <Box className="relative">
+      <Box className={hasFloatingInputDock ? 'mobile-floating-input-layer' : 'relative'}>
         {shouldShowTemplateWelcomeCard && (
           // absolute — taken out of flow, doesn't affect layout of siblings
           // bottom: '100%' — positioned right above the parent box's top edge (like a tooltip anchoring upward)
