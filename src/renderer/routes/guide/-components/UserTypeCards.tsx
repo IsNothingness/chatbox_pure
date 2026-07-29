@@ -5,7 +5,6 @@
 import { Box, Flex, Stack, Text, UnstyledButton } from '@mantine/core'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import iconChatbox from '@/static/icons/icon-chatbox.svg'
 import iconSkip from '@/static/icons/icon-skip.svg'
 import type { UserType } from '../-hooks/useGuideSession'
 
@@ -15,27 +14,20 @@ interface UserTypeCardsProps {
 }
 
 interface CardConfig {
-  type: UserType
+  type: Extract<UserType, 'expert'>
   icon: string
   highlighted: boolean
 }
 
-const cardConfigs: CardConfig[] = [
-  { type: 'novice', icon: iconChatbox, highlighted: true },
-  { type: 'expert', icon: iconSkip, highlighted: false },
-]
+const cardConfigs: CardConfig[] = [{ type: 'expert', icon: iconSkip, highlighted: true }]
 
 export function UserTypeCards({ onSelect, disabled }: UserTypeCardsProps) {
   const { t } = useTranslation()
   const [selectedType, setSelectedType] = useState<UserType | null>(null)
 
   const cardTexts = {
-    novice: {
-      title: t("I'm new to this"),
-      description: t('Use Chatbox AI service'),
-    },
     expert: {
-      title: t('Skip guide'),
+      title: t('Setup Provider'),
       description: t('I know how to configure API keys'),
     },
   } as const

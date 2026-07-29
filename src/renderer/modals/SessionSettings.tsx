@@ -390,8 +390,6 @@ function getReasoningOptionLabel(option: ReasoningControlOption, t: (key: string
 
 // Unified thinking control driven by the shared reasoning-control semantics, replacing
 // the previous per-provider controls (Claude budget, OpenAI effort, Gemini budget/level).
-// Reads and writes the same providerOptions as the input-box ReasoningControlButton so
-// both surfaces always agree on levels and request parameters.
 function ReasoningControlConfig({
   settings,
   onSettingsChange,

@@ -89,7 +89,6 @@ import { CompactionStatus } from '../chat/CompactionStatus'
 import { AdaptiveModal } from '../common/AdaptiveModal'
 import { CompressionModal } from '../common/CompressionModal'
 import { ScalableIcon } from '../common/ScalableIcon'
-import Disclaimer from '../Disclaimer'
 import ProviderImageIcon from '../icons/ProviderImageIcon'
 import ModelSelectorV2 from '../ModelSelectorV2'
 import AgentModeButton from './AgentModeButton'
@@ -98,7 +97,6 @@ import { getAgentModeUIState } from './agentModeState'
 import { ImageUploadInput } from './ImageUploadInput'
 import { MessageInputField, type MessageInputFieldRef } from './MessageInputField'
 import { cleanupFile, markFileProcessing, onFileProcessed, storeFilePromise } from './preprocessState'
-import ReasoningControlButton from './ReasoningControlButton'
 import { getTrailingSkillCommand, hasPendingApprovalToolCall, insertSkillCommandText } from './skillCommand'
 import TokenCountMenu from './TokenCountMenu'
 import { useReasoningControlState } from './useReasoningControlState'
@@ -383,12 +381,9 @@ const InputBox = forwardRef<InputBoxRef, InputBoxProps>(
     )
     const { providers } = useProviders()
     const {
-      effectiveProviderOptions,
       modelInfo,
-      reasoningModelInfo,
       selectedProviderInfo,
       settingsPatch: reasoningSettingsPatch,
-      handleReasoningLevelChange,
       markSettingsCommitted: markReasoningSettingsCommitted,
       waitForPendingPersist: waitForReasoningPersist,
     } = useReasoningControlState({
@@ -1671,15 +1666,6 @@ const InputBox = forwardRef<InputBoxRef, InputBoxProps>(
                   </Tooltip>
                 )}
 
-                <ReasoningControlButton
-                  provider={model?.provider}
-                  model={reasoningModelInfo}
-                  providerOptions={effectiveProviderOptions}
-                  iconSize={toolbarIconSize}
-                  compact={isSmallScreen}
-                  onChange={(level) => void handleReasoningLevelChange(level)}
-                />
-
                 {/* Agent Mode Panel - desktop only */}
                 {platform.type === 'desktop' && (
                   <AgentModeButton
@@ -1870,8 +1856,6 @@ const InputBox = forwardRef<InputBoxRef, InputBoxProps>(
               </Flex>
             </Flex>
           </Stack>
-
-          <Disclaimer />
         </Stack>
         {currentSession && (
           <CompressionModal

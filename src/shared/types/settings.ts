@@ -308,7 +308,7 @@ const ShortcutSettingSchema = z.preprocess(
 
 const ExtensionSettingsSchema = z.object({
   webSearch: z.object({
-    provider: z.enum(['build-in', 'bing', 'tavily', 'bocha', 'querit']).catch('build-in'),
+    provider: z.enum(['build-in', 'bing', 'tavily', 'bocha', 'querit']).catch('bing'),
     tavilyApiKey: z.string().optional(),
     bochaApiKey: z.string().optional(),
     queritApiKey: z.string().optional(),

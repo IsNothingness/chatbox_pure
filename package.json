@@ -1,7 +1,7 @@
 {
-  "name": "xyz.chatboxapp.ce",
-  "productName": "xyz.chatboxapp.ce",
-  "version": "0.0.1",
+  "name": "chatbox-pure",
+  "productName": "ChatBox Pure",
+  "version": "1.0.0",
   "engines": {
     "node": ">=22.13.0 <23.0.0",
     "pnpm": ">=10.17.0"
@@ -72,12 +72,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/chatboxai/chatbox.git"
+    "url": "https://github.com/IsNothingness/chatbox_pure.git"
   },
   "keywords": [],
   "author": {
-    "name": "bennhuang",
-    "email": "tohuangbin@gmail.com"
+    "name": "IsNothingness",
+    "url": "https://github.com/IsNothingness/chatbox_pure"
   },
   "devDependencies": {
     "@ai-sdk/amazon-bedrock": "^4.0.83",

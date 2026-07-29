@@ -18,11 +18,10 @@ const log = getLogger('settings-store')
 
 /**
  * Returns platform-specific default document parser configuration.
- * - Desktop: 'local' (has full Node.js environment for local parsing)
- * - Mobile/Web: 'chatbox-ai' (local-first parsing with Chatbox AI cloud fallback)
+ * Pure always defaults to local parsing and never falls back to ChatBox cloud services.
  */
 export function getPlatformDefaultDocumentParser(): DocumentParserConfig {
-  return platform.type === 'desktop' ? { type: 'local' } : { type: 'chatbox-ai' }
+  return { type: 'local' }
 }
 
 type Action = {
@@ -36,6 +35,15 @@ function mergeWithDefaultSettings(persisted: unknown): Settings {
   const mergedSettings = deepmerge<Settings, Partial<Settings>>(defaults.settings(), persistedSettings, {
     arrayMerge: (_target, source) => source,
   })
+  if (mergedSettings.extension.webSearch.provider === 'build-in') {
+    mergedSettings.extension.webSearch.provider = 'bing'
+  }
+  if (
+    mergedSettings.extension.documentParser?.type === 'none' ||
+    mergedSettings.extension.documentParser?.type === 'chatbox-ai'
+  ) {
+    mergedSettings.extension.documentParser.type = 'local'
+  }
   const parsedSettings = SettingsSchema.safeParse(mergedSettings)
   return parsedSettings.success ? parsedSettings.data : mergedSettings
 }
@@ -72,7 +80,7 @@ export const settingsStore = createStore<Settings & Action>()(
           },
           removeItem: async (name) => await storage.removeItem(name),
         })),
-        version: 5,
+        version: 6,
         partialize: (state) => {
           try {
             return SettingsSchema.parse(state)
@@ -112,8 +120,15 @@ export const settingsStore = createStore<Settings & Action>()(
               }
             case 3:
             case 4:
-              if (platform.type !== 'desktop' && settings.extension?.documentParser?.type === 'none') {
-                settings.extension.documentParser.type = 'chatbox-ai'
+            case 5:
+              if (settings.extension?.webSearch?.provider === 'build-in') {
+                settings.extension.webSearch.provider = 'bing'
+              }
+              if (
+                settings.extension?.documentParser?.type === 'none' ||
+                settings.extension?.documentParser?.type === 'chatbox-ai'
+              ) {
+                settings.extension.documentParser.type = 'local'
               }
             default:
               break

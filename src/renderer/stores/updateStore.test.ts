@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { useUpdateStore } from './updateStore'
+import platform from '@/platform'
+import { checkForPureUpdate, useUpdateStore } from './updateStore'
 
 function resetStore() {
   useUpdateStore.setState({
     status: 'idle',
     progress: 0,
     version: null,
+    downloadUrl: null,
     error: null,
     dismissedVersion: null,
   })
@@ -18,6 +20,63 @@ describe('updateStore', () => {
 
   afterEach(() => {
     vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  })
+
+  describe('Pure release metadata', () => {
+    it('selects the full package for the current platform when a newer version exists', async () => {
+      vi.spyOn(platform, 'getVersion').mockResolvedValue('1.0.0')
+      vi.spyOn(platform, 'getPlatform').mockResolvedValue('android')
+      vi.spyOn(platform, 'getArch').mockResolvedValue('arm64')
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => ({
+            schemaVersion: 1,
+            version: '2.0.0',
+            publishedAt: '2026-07-29T00:00:00Z',
+            releasePage: 'https://example.com/releases/latest',
+            packages: {
+              android: { url: 'https://example.com/pure.apk' },
+            },
+          }),
+        })
+      )
+
+      await checkForPureUpdate()
+
+      expect(useUpdateStore.getState()).toMatchObject({
+        status: 'available',
+        version: '2.0.0',
+        downloadUrl: 'https://example.com/pure.apk',
+      })
+    })
+
+    it('does not offer an older or equal release', async () => {
+      vi.spyOn(platform, 'getVersion').mockResolvedValue('2.0.0')
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => ({
+            schemaVersion: 1,
+            version: '2.0.0',
+            publishedAt: '2026-07-29T00:00:00Z',
+            releasePage: 'https://example.com/releases/latest',
+            packages: {},
+          }),
+        })
+      )
+
+      await checkForPureUpdate()
+
+      expect(useUpdateStore.getState()).toMatchObject({
+        status: 'up-to-date',
+        version: null,
+        downloadUrl: null,
+      })
+    })
   })
 
   describe('initial state', () => {

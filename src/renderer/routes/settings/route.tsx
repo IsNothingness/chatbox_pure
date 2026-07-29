@@ -1,4 +1,4 @@
-import { ActionIcon, Box, Flex, Indicator, Stack, Text } from '@mantine/core'
+import { ActionIcon, Box, Flex, Stack, Text } from '@mantine/core'
 import {
   IconAdjustmentsHorizontal,
   IconArchive,
@@ -12,7 +12,6 @@ import {
   IconInfoCircle,
   IconKeyboard,
   IconMessages,
-  IconSparkles,
   IconWand,
   IconWorldWww,
 } from '@tabler/icons-react'
@@ -23,17 +22,11 @@ import { Toaster } from 'sonner'
 import Divider from '@/components/common/Divider'
 import { ScalableIcon } from '@/components/common/ScalableIcon'
 import Page from '@/components/layout/Page'
-import { useProviders } from '@/hooks/useProviders'
 import { useIsSmallScreen } from '@/hooks/useScreenChange'
 import platform from '@/platform'
 import { featureFlags } from '@/utils/feature-flags'
 
 const ITEMS = [
-  {
-    key: 'chatbox-ai',
-    label: 'Chatbox AI',
-    icon: <IconSparkles className="w-full h-full" />,
-  },
   {
     key: 'provider',
     label: 'Model Provider',
@@ -147,8 +140,6 @@ export function SettingsRoot() {
   const routerState = useRouterState()
   const key = routerState.location.pathname.split('/')[2]
   const isSmallScreen = useIsSmallScreen()
-  const { providers: availableProviders } = useProviders()
-  const isChatboxAIActivated = availableProviders.some((p) => p.id === 'chatbox-ai')
 
   return (
     <Flex flex={1} h="100%" miw={isSmallScreen ? undefined : 800}>
@@ -197,9 +188,6 @@ export function SettingsRoot() {
                 >
                   {'noTranslate' in item && item.noTranslate ? item.label : t(item.label)}
                 </Text>
-                {item.key === 'chatbox-ai' && isChatboxAIActivated && (
-                  <Indicator size={8} color="chatbox-success" className="ml-auto" />
-                )}
                 {isSmallScreen && (
                   <ScalableIcon icon={IconChevronRight} size={20} className="!text-chatbox-tint-tertiary" />
                 )}
@@ -209,35 +197,43 @@ export function SettingsRoot() {
             </Link>
           ))}
 
-          {isSmallScreen && (
-            <Link to={`/about`} className={'block no-underline w-full'}>
-              <Flex
-                component="span"
-                gap="xs"
-                p="md"
-                pr="xl"
-                py="sm"
-                align="center"
-                c={'chatbox-secondary'}
-                className={clsx(' cursor-pointer select-none rounded-md')}
+          <Link
+            disabled={routerState.location.pathname === '/about'}
+            to="/about"
+            className={'block no-underline w-full'}
+          >
+            <Flex
+              component="span"
+              gap="xs"
+              p="md"
+              pr="xl"
+              py="sm"
+              align="center"
+              c={routerState.location.pathname === '/about' ? 'chatbox-brand' : 'chatbox-secondary'}
+              bg={
+                routerState.location.pathname === '/about' ? 'var(--chatbox-background-brand-secondary)' : 'transparent'
+              }
+              className={clsx(
+                'cursor-pointer select-none rounded-md',
+                routerState.location.pathname === '/about' ? '' : 'hover:!bg-chatbox-background-gray-secondary'
+              )}
+            >
+              <Box component="span" flex="0 0 auto" w={20} h={20} mr="xs">
+                <ScalableIcon icon={IconInfoCircle} size={20} />
+              </Box>
+              <Text
+                flex={1}
+                lineClamp={1}
+                span={true}
+                className={`!text-inherit ${isSmallScreen ? 'min-h-[32px] leading-[32px]' : ''}`}
               >
-                <Box component="span" flex="0 0 auto" w={20} h={20} mr="xs">
-                  <ScalableIcon icon={IconInfoCircle} size={20} />
-                </Box>
-                <Text
-                  flex={1}
-                  lineClamp={1}
-                  span={true}
-                  className={`!text-inherit ${isSmallScreen ? 'min-h-[32px] leading-[32px]' : ''}`}
-                >
-                  {t('About')}
-                </Text>
-                <ScalableIcon icon={IconChevronRight} size={20} className="!text-chatbox-tint-tertiary" />
-              </Flex>
+                {t('About')}
+              </Text>
+              <ScalableIcon icon={IconChevronRight} size={20} className="!text-chatbox-tint-tertiary" />
+            </Flex>
 
-              {isSmallScreen && <Divider />}
-            </Link>
-          )}
+            {isSmallScreen && <Divider />}
+          </Link>
         </Stack>
       )}
       {!(isSmallScreen && routerState.location.pathname === '/settings') && (

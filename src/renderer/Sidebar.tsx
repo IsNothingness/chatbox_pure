@@ -8,7 +8,6 @@ import {
   IconCode,
   IconDownload,
   IconHelpCircle,
-  IconInfoCircle,
   IconLayoutSidebarLeftCollapse,
   IconMessageChatbot,
   IconPhotoPlus,
@@ -178,22 +177,11 @@ export default function Sidebar() {
           className="border-0 border-b border-solid border-chatbox-border-primary"
         >
           <Flex align="center" gap="sm" style={{ minWidth: 0, flex: 1 }}>
-            <Flex
-              align="center"
-              gap="sm"
-              onClick={() => navigate({ to: '/about' })}
-              style={{ cursor: 'pointer', minWidth: 0 }}
-            >
+            <Flex align="center" gap="sm" style={{ minWidth: 0 }}>
               <Image src={icon} w={20} h={20} />
               <Text span c="chatbox-secondary" size="xl" lh={1.2} fw="700" truncate>
                 Chatbox
               </Text>
-              {/* Desktop shows the version in the bottom About link, so only surface it here on mobile */}
-              {isSmallScreen && /\d/.test(versionHook.version) && (
-                <Text span c="chatbox-tertiary" size="sm">
-                  {versionHook.version}
-                </Text>
-              )}
             </Flex>
             {FORCE_ENABLE_DEV_PAGES && <ThemeSwitchButton size="xs" />}
           </Flex>
@@ -293,8 +281,6 @@ export default function Sidebar() {
               >
                 <ScalableIcon icon={IconSettingsFilled} size={20} />
               </ActionIcon>
-
-              <SmallScreenAboutIcon versionHook={versionHook} navigate={navigate} setShowSidebar={setShowSidebar} />
             </Flex>
           ) : (
             <>
@@ -345,7 +331,6 @@ export default function Sidebar() {
                   p="xs"
                 />
               )}
-              <AboutNavLink versionHook={versionHook} navigate={navigate} />
             </>
           )}
         </Stack>
@@ -363,13 +348,7 @@ export default function Sidebar() {
   )
 }
 
-/**
- * Desktop: shows update banner when an update is downloaded and ready to install.
- * Not shown on mobile (mobile uses dot indicator on About link).
- */
 function SidebarUpdateBanner() {
-  const isMobile = CHATBOX_BUILD_TARGET === 'mobile_app'
-  if (isMobile) return null
   return <SidebarUpdateBannerInner />
 }
 
@@ -378,7 +357,7 @@ function SidebarUpdateBannerInner() {
   const updateStatus = useUpdateStore((s) => s.status)
   const updateVersion = useUpdateStore((s) => s.version)
 
-  if (updateStatus !== 'downloaded') return null
+  if (updateStatus !== 'available' && updateStatus !== 'downloaded') return null
 
   return (
     <Box px="xs" pb={4}>
@@ -392,82 +371,11 @@ function SidebarUpdateBannerInner() {
       >
         <ScalableIcon icon={IconDownload} size={16} className="text-chatbox-brand flex-shrink-0" />
         <Text size="sm" c="chatbox-brand" lineClamp={1} flex={1}>
-          {`${t('Update ready to install')}${updateVersion ? ` (v${updateVersion})` : ''}`}
+          {`${t(updateStatus === 'available' ? 'New version available' : 'Update ready to install')}${
+            updateVersion ? ` (v${updateVersion})` : ''
+          }`}
         </Text>
       </Flex>
-    </Box>
-  )
-}
-
-/**
- * About NavLink with update dot indicator.
- * Desktop: shows dot when electron-updater detects update (downloaded/available).
- * Mobile: shows dot when remote API says needCheckUpdate.
- */
-function useShowUpdateDot(versionHook: ReturnType<typeof useVersion>) {
-  const updateStatus = useUpdateStore((s) => s.status)
-  const isMobile = CHATBOX_BUILD_TARGET === 'mobile_app'
-  return isMobile ? versionHook.needCheckUpdate : updateStatus === 'downloaded'
-}
-
-function AboutNavLink({
-  versionHook,
-  navigate,
-}: {
-  versionHook: ReturnType<typeof useVersion>
-  navigate: ReturnType<typeof useNavigate>
-}) {
-  const { t } = useTranslation()
-  const showDot = useShowUpdateDot(versionHook)
-
-  return (
-    <NavLink
-      c="chatbox-tertiary"
-      className="rounded"
-      label={
-        <Flex align="center" gap={6}>
-          <span>{`${t('About')} ${/\d/.test(versionHook.version) ? `(${versionHook.version})` : ''}`}</span>
-          {showDot && <Box w={8} h={8} miw={8} bg="chatbox-brand" style={{ borderRadius: '50%' }} />}
-        </Flex>
-      }
-      leftSection={<ScalableIcon icon={IconInfoCircle} size={20} />}
-      onClick={() => navigate({ to: '/about' })}
-      variant="light"
-      p="xs"
-    />
-  )
-}
-
-/**
- * Small screen About icon with dot indicator for mobile.
- */
-function SmallScreenAboutIcon({
-  versionHook,
-  navigate,
-  setShowSidebar,
-}: {
-  versionHook: ReturnType<typeof useVersion>
-  navigate: ReturnType<typeof useNavigate>
-  setShowSidebar: (v: boolean) => void
-}) {
-  const showDot = useShowUpdateDot(versionHook)
-
-  return (
-    <Box className="relative">
-      <ActionIcon
-        variant="transparent"
-        color="chatbox-secondary"
-        size={24}
-        onClick={() => {
-          navigate({ to: '/about' })
-          setShowSidebar(false)
-        }}
-      >
-        <ScalableIcon icon={IconInfoCircle} size={20} />
-      </ActionIcon>
-      {showDot && (
-        <Box w={8} h={8} bg="chatbox-brand" className="absolute -top-0.5 -right-0.5" style={{ borderRadius: '50%' }} />
-      )}
     </Box>
   )
 }

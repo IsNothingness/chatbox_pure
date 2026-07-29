@@ -7,11 +7,9 @@ import { useTranslation } from 'react-i18next'
 import { AdaptiveSelect } from '@/components/AdaptiveSelect'
 import { PROVIDERS_WITH_PARSE_LINK } from '@/packages/web-search'
 import { BochaSearch } from '@/packages/web-search/bocha'
+import { WEB_SEARCH_PROVIDERS, type WebSearchProviderValue } from '@/packages/web-search/constants'
 import { QUERIT_SEARCH_URL } from '@/packages/web-search/querit'
 import platform from '@/platform'
-import { trackJkClickEvent } from '@/analytics/jk'
-import { JK_EVENTS, JK_PAGE_NAMES } from '@/analytics/jk-events'
-import { WEB_SEARCH_PROVIDERS } from '@/packages/web-search/constants'
 import { useSettingsStore } from '@/stores/settingsStore'
 
 export const Route = createFileRoute('/settings/web-search')({
@@ -22,7 +20,6 @@ export function RouteComponent() {
   const { t } = useTranslation()
   const setSettings = useSettingsStore((state) => state.setSettings)
   const extension = useSettingsStore((state) => state.extension)
-  const licenseKey = useSettingsStore((state) => state.licenseKey)
 
   const [checkingQuerit, setCheckingQuerit] = useState(false)
   const [queritAvailable, setQueritAvailable] = useState<boolean>()
@@ -40,7 +37,7 @@ export function RouteComponent() {
           body: { query: 'Chatbox' },
         })
         setQueritAvailable(true)
-      } catch (e) {
+      } catch {
         setQueritAvailable(false)
       } finally {
         setCheckingQuerit(false)
@@ -57,7 +54,7 @@ export function RouteComponent() {
       try {
         await new BochaSearch(extension.webSearch.bochaApiKey).search('Chatbox')
         setBochaAvailable(true)
-      } catch (e) {
+      } catch {
         setBochaAvailable(false)
       } finally {
         setCheckingBocha(false)
@@ -86,7 +83,7 @@ export function RouteComponent() {
           },
         })
         setTavilyAvaliable(true)
-      } catch (e) {
+      } catch {
         setTavilyAvaliable(false)
       } finally {
         setCheckingTavily(false)
@@ -109,7 +106,7 @@ export function RouteComponent() {
               ...extension,
               webSearch: {
                 ...extension.webSearch,
-                provider: e as 'build-in' | 'bing' | 'tavily' | 'bocha' | 'querit',
+                provider: e as WebSearchProviderValue,
               },
             },
           })
@@ -141,11 +138,6 @@ export function RouteComponent() {
           ))
         })()}
       </Stack>
-      {extension.webSearch.provider === 'build-in' && (
-        <Text size="xs" c="chatbox-gray">
-          {t('Chatbox Search is a paid feature with advanced capabilities and better performance.')}
-        </Text>
-      )}
       {extension.webSearch.provider === 'bing' && (
         <Text size="xs" c="chatbox-gray">
           {t(
@@ -404,39 +396,6 @@ export function RouteComponent() {
             </Stack>
           </Stack>
         </Stack>
-      )}
-      {extension.webSearch.provider !== 'build-in' && !licenseKey && (
-        <Tooltip
-          label={t(
-            'Note: If you have never had a license before, you can claim it after logging in on the official website. Quota refreshed daily.'
-          )}
-          withArrow
-          multiline
-          maw={280}
-          position="bottom-start"
-          styles={{
-            tooltip: {
-              backgroundColor: 'rgba(0, 0, 0, 0.75)',
-              backdropFilter: 'blur(4px)',
-            },
-          }}
-        >
-          <Text
-            size="xs"
-            className="cursor-pointer"
-            onClick={() => {
-              trackJkClickEvent(JK_EVENTS.FREE_LICENSE_CLAIM_CLICK, {
-                pageName: JK_PAGE_NAMES.SETTING_PAGE,
-                content: 'settings_websearch',
-              })
-              platform.openLink('https://chatboxai.app/login')
-            }}
-          >
-            {t('You can ')}
-            <span className="text-blue-500 underline decoration-dotted">{t('try Chatbox AI')}</span>
-            {t(' for free now!')}
-          </Text>
-        </Tooltip>
       )}
     </Stack>
   )

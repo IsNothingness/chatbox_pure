@@ -40,7 +40,7 @@ import { initOnboardingStore } from './stores/onboardingStore'
 import { initLoginLicenseStateReconciliation } from './stores/premiumActions'
 import { initRecentDirectoriesStore } from './stores/recentDirectoriesStore'
 import { initSettingsStore } from './stores/settingsStore'
-import { initUpdateListeners } from './stores/updateStore'
+import { initUpdateManager } from './stores/updateStore'
 import { reportError } from './utils/sentry'
 
 // 开发环境下引入错误测试工具
@@ -171,9 +171,9 @@ initializeApp()
     i18n.changeLanguage(settings.language)
     initLoginLicenseStateReconciliation()
 
-    // Initialize auto-updater event listeners (desktop only, idempotent)
+    // Check the Pure repository metadata for full-package updates on every platform.
+    initUpdateManager()
     if (platform.type === 'desktop') {
-      initUpdateListeners()
       initSessionAttachmentRagMaintenance()
     }
     // Cleanup is intentionally not captured — listeners persist for the app lifetime

@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "version": "1.0.0",
+  "publishedAt": "2026-07-29T00:00:00Z",
+  "releasePage": "https://github.com/IsNothingness/chatbox_pure/releases/latest",
+  "packages": {
+    "android": {
+      "url": "https://github.com/IsNothingness/chatbox_pure/releases/download/v1.0.0/ChatBox-Pure-1.0.0.apk"
+    },
+    "windows-x64": {
+      "url": "https://github.com/IsNothingness/chatbox_pure/releases/download/v1.0.0/ChatBox-Pure-1.0.0-x64-Setup.exe"
+    },
+    "windows-arm64": {
+      "url": "https://github.com/IsNothingness/chatbox_pure/releases/download/v1.0.0/ChatBox-Pure-1.0.0-arm64-Setup.exe"
+    },
+    "macos-x64": {
+      "url": "https://github.com/IsNothingness/chatbox_pure/releases/download/v1.0.0/ChatBox-Pure-1.0.0-x64.dmg"
+    },
+    "macos-arm64": {
+      "url": "https://github.com/IsNothingness/chatbox_pure/releases/download/v1.0.0/ChatBox-Pure-1.0.0-arm64.dmg"
+    },
+    "linux-x64": {
+      "url": "https://github.com/IsNothingness/chatbox_pure/releases/download/v1.0.0/ChatBox-Pure-1.0.0-x64.AppImage"
+    },
+    "linux-arm64": {
+      "url": "https://github.com/IsNothingness/chatbox_pure/releases/download/v1.0.0/ChatBox-Pure-1.0.0-arm64.AppImage"
+    }
+  }
+}

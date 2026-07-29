@@ -11,16 +11,7 @@ import Markdown from '@/components/Markdown'
 import { cn } from '@/lib/utils'
 import type { UserLicense } from '@/packages/remote'
 import type { GuideToolPart, GuideUIMessage, UserType } from '../-hooks/useGuideSession'
-import {
-  AutoNewChatLoading,
-  FreeTrialLink,
-  LoginButton,
-  NewChatButton,
-  NewChatTip,
-  ProviderSettingsButton,
-  ViewLicenseButton,
-} from './ActionButton'
-import { ClaimWaitingCard } from './ClaimWaitingCard'
+import { AutoNewChatLoading, NewChatButton, NewChatTip, ProviderSettingsButton } from './ActionButton'
 import { SuggestedQuestions } from './SuggestedQuestions'
 import { UserTypeCards } from './UserTypeCards'
 
@@ -40,10 +31,7 @@ interface GuideMessageProps {
 function ToolPartRenderer({
   part,
   onSelectUserType,
-  onLoginSuccess,
   onQuestionClick,
-  onClaimStart,
-  onClaimDetected,
   disabled,
 }: {
   part: GuideToolPart
@@ -60,8 +48,7 @@ function ToolPartRenderer({
       return <UserTypeCards onSelect={onSelectUserType} disabled={disabled} />
 
     case 'show_login_button':
-      if (!onLoginSuccess) return null
-      return <LoginButton onLoginSuccess={onLoginSuccess} />
+      return <ProviderSettingsButton />
 
     case 'show_provider_settings_button':
       return <ProviderSettingsButton />
@@ -83,18 +70,17 @@ function ToolPartRenderer({
       return <NewChatTip />
 
     case 'show_view_license_button':
-      return <ViewLicenseButton />
+      return <ProviderSettingsButton />
 
     case 'show_suggested_questions':
       if (!onQuestionClick) return null
       return <SuggestedQuestions onQuestionClick={onQuestionClick} disabled={disabled} />
 
     case 'show_free_trial_link':
-      return <FreeTrialLink onAfterClick={onClaimStart} />
+      return <ProviderSettingsButton />
 
     case 'show_claim_waiting':
-      if (!onClaimDetected) return null
-      return <ClaimWaitingCard onClaimDetected={onClaimDetected} />
+      return <ProviderSettingsButton />
 
     case 'mark_completed':
     case 'activate_license':

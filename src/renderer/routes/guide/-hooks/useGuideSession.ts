@@ -420,11 +420,11 @@ Chatbox is an **all-in-one AI chat client** that supports 30+ mainstream models 
 
       trackJkClickEvent(JK_EVENTS.ONBOARDING_CHOICE_CLICK, {
         pageName: JK_PAGE_NAMES.HELP_PAGE,
-        content: type === 'novice' ? 'new_user' : 'skip_guide',
+        content: type === 'novice' ? 'new_user' : 'configure_provider',
       })
 
       // Add user selection as a message (instant)
-      const userContent = type === 'novice' ? t("I'm new to this") : t('Skip guide')
+      const userContent = type === 'novice' ? t("I'm new to this") : t('Setup Provider')
       appendFixedMessage(userContent, undefined, 'user')
 
       // Get the response content

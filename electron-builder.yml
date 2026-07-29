@@ -1,5 +1,5 @@
-productName: Chatbox
-appId: xyz.chatboxapp.app
+productName: ChatBox Pure
+appId: io.github.isnothingness.chatboxpure
 asar: true
 asarUnpack:
   - "**/*.{node,dll}"
@@ -35,6 +35,7 @@ mac:
   gatekeeperAssess: false
 
 dmg:
+  artifactName: ChatBox-Pure-${version}-${arch}.${ext}
   contents:
     - x: 130
       y: 220
@@ -50,7 +51,7 @@ win:
         - x64
         - arm64
   verifyUpdateCodeSignature: false
-  artifactName: ${productName}-${version}-Setup.${ext}
+  artifactName: ChatBox-Pure-${version}-${arch}-Setup.${ext}
   signtoolOptions:
     sign: ./custom_win_sign.js
     signingHashAlgorithms:
@@ -72,7 +73,7 @@ linux:
         - x64
         - arm64
   category: Development
-  artifactName: ${productName}-${version}-${arch}.${ext}
+  artifactName: ChatBox-Pure-${version}-${arch}.${ext}
 
 directories:
   app: release/app

@@ -35,8 +35,6 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import Divider from '@/components/common/Divider'
 import { ScalableIcon } from '@/components/common/ScalableIcon'
-import Disclaimer from '@/components/Disclaimer'
-import ProviderImageIcon from '@/components/icons/ProviderImageIcon'
 import WindowControls from '@/components/layout/WindowControls'
 import { getShowGuideDevButtonsFlag } from '@/dev/devToolsFlags'
 import useNeedRoomForWinControls from '@/hooks/useNeedRoomForWinControls'
@@ -353,7 +351,7 @@ function GuidePage() {
                   value={inputValue}
                   onChange={(e) => setInputValue(e.target.value)}
                   onKeyDown={handleKeyDown}
-                  placeholder={t('Type your Chatbox AI-related question here') || ''}
+                  placeholder={t('Type your question here') || ''}
                   disabled={!canSendMessage || isLoading}
                   autosize
                   minRows={2}
@@ -386,34 +384,11 @@ function GuidePage() {
 
               {/* Bottom toolbar */}
               <Flex justify="flex-end" align="center">
-                {/* Model Selector */}
-                <Menu position="top-end" shadow="md" transitionProps={{ transition: 'fade-up', duration: 200 }}>
-                  <Menu.Target>
-                    <UnstyledButton className="flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-[var(--chatbox-background-tertiary)] transition-colors">
-                      <ProviderImageIcon provider="chatbox-ai" size={18} />
-                      <Text size="sm" className="text-[var(--chatbox-tint-secondary)]">
-                        Chatbox Guide
-                      </Text>
-                      <ScalableIcon
-                        icon={IconChevronRight}
-                        size={14}
-                        className="text-chatbox-tint-tertiary rotate-90 flex-shrink-0"
-                      />
-                    </UnstyledButton>
-                  </Menu.Target>
-                  <Menu.Dropdown>
-                    <Menu.Item
-                      leftSection={<ProviderImageIcon provider="chatbox-ai" size={16} />}
-                      rightSection={<ScalableIcon icon={IconCheck} size={14} className="text-chatbox-tint-brand" />}
-                    >
-                      Chatbox Guide
-                    </Menu.Item>
-                  </Menu.Dropdown>
-                </Menu>
+                <Text size="sm" className="px-2 py-1 text-[var(--chatbox-tint-secondary)]">
+                  Pure Guide
+                </Text>
               </Flex>
             </Stack>
-
-            <Disclaimer />
           </Stack>
         </Box>
       )}

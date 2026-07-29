@@ -1,12 +1,11 @@
 {
-  "name": "xyz.chatboxapp.ce",
-  "productName": "xyz.chatboxapp.ce",
-  "version": "1.22.1",
+  "name": "chatbox-pure",
+  "productName": "ChatBox Pure",
+  "version": "1.0.0",
   "description": "A desktop client for multiple cutting-edge AI models",
   "author": {
-    "name": "Mediocre Company",
-    "email": "hi@chatboxai.com",
-    "url": "https://github.com/chatboxai"
+    "name": "IsNothingness",
+    "url": "https://github.com/IsNothingness/chatbox_pure"
   },
   "main": "./dist/main/main.js",
   "scripts": {

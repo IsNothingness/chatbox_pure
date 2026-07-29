@@ -304,7 +304,7 @@ export const imageCreatorSessionForCN: Session = {
   starred: true,
   settings: {
     dalleStyle: 'vivid',
-    provider: ModelProviderEnum.ChatboxAI,
+    provider: ModelProviderEnum.OpenAI,
     modelId: 'DALL-E-3',
   },
   messages: [
@@ -417,7 +417,7 @@ export const imageCreatorSessionForEN: Session = {
   starred: true,
   settings: {
     dalleStyle: 'vivid',
-    provider: ModelProviderEnum.ChatboxAI,
+    provider: ModelProviderEnum.OpenAI,
     modelId: 'DALL-E-3',
   },
   messages: [

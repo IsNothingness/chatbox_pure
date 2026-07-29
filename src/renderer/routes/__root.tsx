@@ -28,10 +28,9 @@ import {
 import { Box, Grid } from '@mui/material'
 import CssBaseline from '@mui/material/CssBaseline'
 import { ThemeProvider } from '@mui/material/styles'
-import { type RemoteConfig, Theme } from '@shared/types'
+import { Theme } from '@shared/types'
 import { useQuery } from '@tanstack/react-query'
 import { createRootRoute, Outlet, useLocation } from '@tanstack/react-router'
-import { useSetAtom } from 'jotai'
 import { useEffect, useMemo, useRef } from 'react'
 import { trackJkViewEvent } from '@/analytics/jk'
 import { JK_EVENTS, JK_PAGE_NAMES } from '@/analytics/jk-events'
@@ -45,27 +44,22 @@ import { useI18nEffect } from '@/hooks/useI18nEffect'
 import useNeedRoomForWinControls from '@/hooks/useNeedRoomForWinControls'
 import useScreenChange, { useSidebarWidth } from '@/hooks/useScreenChange'
 import useShortcut from '@/hooks/useShortcut'
-import useVersion from '@/hooks/useVersion'
 import '@/modals'
 import SettingsModal, { navigateToSettings } from '@/modals/Settings'
 import { prefetchModelRegistry } from '@/packages/model-registry'
 import { getOS } from '@/packages/navigator'
-import * as remote from '@/packages/remote'
 import PictureDialog from '@/pages/PictureDialog'
-import RemoteDialogWindow from '@/pages/RemoteDialogWindow'
 import SearchDialog from '@/pages/SearchDialog'
 import platform from '@/platform'
 import { router } from '@/router'
 import Sidebar from '@/Sidebar'
 import storage from '@/storage'
-import * as atoms from '@/stores/atoms'
 import { getSession, useSession } from '@/stores/chatStore'
 import { initOnboardingStore, onboardingStore } from '@/stores/onboardingStore'
 import * as premiumActions from '@/stores/premiumActions'
 import * as settingActions from '@/stores/settingActions'
 import { initSettingsStore, settingsStore, useLanguage, useSettingsStore, useTheme } from '@/stores/settingsStore'
 import { useUIStore } from '@/stores/uiStore'
-import { CHATBOX_BUILD_CHANNEL, CHATBOX_BUILD_PLATFORM } from '@/variables'
 import { blobToDataUrl } from './image-creator/-components/constants'
 
 function BackgroundImageOverlay() {
@@ -135,15 +129,10 @@ function BackgroundImageOverlay() {
 function Root() {
   useScreenChange()
 
-  const { isExceeded, isExceededResolved } = useVersion()
   const location = useLocation()
   const spellCheck = useSettingsStore((state) => state.spellCheck)
   const language = useLanguage()
   const initialized = useRef(false)
-
-  const setOpenAboutDialog = useUIStore((s) => s.setOpenAboutDialog)
-
-  const setRemoteConfig = useSetAtom(atoms.remoteConfigAtom)
 
   useEffect(() => {
     if (initialized.current) {
@@ -155,11 +144,6 @@ function Root() {
       await Promise.all([initSettingsStore(), initOnboardingStore()])
       void prefetchModelRegistry()
 
-      const remoteConfig = await remote
-        .getRemoteConfig('setting_chatboxai_first')
-        .catch(() => ({ setting_chatboxai_first: false }) as RemoteConfig)
-      setRemoteConfig(async (prev) => ({ ...(await prev), ...remoteConfig }))
-
       // Skip guide-related checks if already on guide, dev tools, or settings/mcp page
       if (
         location.pathname === '/guide' ||
@@ -167,17 +151,6 @@ function Root() {
         location.pathname === '/settings/mcp'
       ) {
         initialized.current = true
-        return
-      }
-
-      // On store builds (iOS / Google Play), wait for both version AND remoteConfig.current_version
-      // before making guide/navigation decisions. isExceeded depends on both async data sources;
-      // if we only wait for version, remoteConfig may still be empty, causing isExceeded to be
-      // falsely falsy and letting the guide navigation slip through during store review.
-      const isStoreReviewPlatform =
-        CHATBOX_BUILD_PLATFORM === 'ios' ||
-        (CHATBOX_BUILD_PLATFORM === 'android' && CHATBOX_BUILD_CHANNEL === 'google_play')
-      if (isStoreReviewPlatform && !isExceededResolved) {
         return
       }
 
@@ -189,20 +162,15 @@ function Root() {
       const needsSetup = settingActions.needEditSetting()
 
       // Auto-navigate to guide for new users who need setup
-      if (!isExceeded && !onboardingCompleted && needsSetup) {
+      if (!onboardingCompleted && needsSetup) {
         router.navigate({ to: '/guide', replace: true })
         return
       }
 
       // 是否需要弹出关于窗口（更新后首次启动）
       // 目前仅在桌面版本更新后首次启动、且网络环境为"外网"的情况下才自动弹窗
-      const shouldShowAboutDialogWhenStartUp = await platform.shouldShowAboutDialogWhenStartUp()
-      if (shouldShowAboutDialogWhenStartUp && remoteConfig.setting_chatboxai_first) {
-        setOpenAboutDialog(true)
-        return
-      }
     })()
-  }, [setOpenAboutDialog, setRemoteConfig, location.pathname, isExceeded, isExceededResolved])
+  }, [location.pathname])
 
   const showSidebar = useUIStore((s) => s.showSidebar)
   const sidebarWidth = useSidebarWidth()
@@ -344,7 +312,6 @@ function Root() {
       {/* 图片预览 */}
       <PictureDialog />
       {/* 似乎是从后端拉一个弹窗的配置 */}
-      <RemoteDialogWindow />
       {/* 手机端举报内容 */}
       {/* <ReportContentDialog /> */}
       {/* 搜索 */}
