@@ -246,6 +246,14 @@ describe('ZIP backup round trip', () => {
       defaultAssistantAvatarKey: 'picture:kept',
       licenseKey: 'secret-license',
       providers: { custom: { apiKey: 'secret-api-key', apiHost: 'https://example.com' } },
+      conversationListMenu: {
+        pin: false,
+        edit: true,
+        duplicate: false,
+        reorder: true,
+        archive: false,
+        delete: true,
+      },
     } as unknown as Settings
     const copilots: CopilotDetail[] = [
       {
@@ -287,6 +295,14 @@ describe('ZIP backup round trip', () => {
     expect(destination.values.get(BackupStorageKey.Settings)).toEqual({
       defaultAssistantAvatarKey: 'picture:kept',
       providers: { custom: { apiHost: 'https://example.com' } },
+      conversationListMenu: {
+        pin: false,
+        edit: true,
+        duplicate: false,
+        reorder: true,
+        archive: false,
+        delete: true,
+      },
     })
     expect(destination.values.get(BackupStorageKey.MyCopilots)).toEqual([
       {

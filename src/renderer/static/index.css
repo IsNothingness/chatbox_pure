@@ -188,7 +188,8 @@ html[data-theme="light"] {
   height: calc(var(--mobile-input-dock-height, 150px) + 8px);
 }
 
-.mobile-message-list-with-floating-dock .mobile-scroll-to-bottom-button {
+.mobile-message-list-with-floating-dock .mobile-scroll-to-bottom-button,
+.mobile-message-list-with-floating-dock .mobile-message-navigation {
   bottom: calc(var(--mobile-input-dock-height, 150px) + 8px) !important;
 }
 

@@ -11,12 +11,9 @@ async function loadSettingsStoreModule(
   vi.resetModules()
 
   const mockStorage = {
-    getItem: vi.fn(async (key: string, initialValue: unknown) => {
-      if (key === 'settings') {
-        return persistedSettings
-      }
-      return initialValue
-    }),
+    getItem: vi.fn((key: string, initialValue: unknown) =>
+      Promise.resolve(key === 'settings' ? persistedSettings : initialValue)
+    ),
     setItem: vi.fn(async () => undefined),
     removeItem: vi.fn(async () => undefined),
   }
@@ -175,6 +172,24 @@ describe('settingsStore persistence', () => {
     const { getPlatformDefaultDocumentParser } = await loadSettingsStoreModule(null, 'desktop')
 
     expect(getPlatformDefaultDocumentParser()).toEqual({ type: 'local' })
+  })
+
+  it('adds default conversation menu visibility to older persisted settings', async () => {
+    const { initSettingsStore } = await loadSettingsStoreModule({
+      language: 'zh-Hans',
+      __version: 6,
+    })
+
+    const hydrated = await initSettingsStore()
+
+    expect(hydrated.conversationListMenu).toEqual({
+      pin: true,
+      edit: true,
+      duplicate: true,
+      reorder: true,
+      archive: true,
+      delete: true,
+    })
   })
 
   it.each([

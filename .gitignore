@@ -183,6 +183,7 @@ temp.md
 /output/playwright/
 .playwright-cli/
 node-compile-cache/
+.pnpm-store/
 
 *storybook.log
 storybook-static

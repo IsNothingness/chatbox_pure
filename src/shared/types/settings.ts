@@ -465,6 +465,23 @@ export const SettingsSchema = GlobalSessionSettingsSchema.extend({
 
   showAvatar: z.boolean().optional().catch(undefined),
   messageLayout: z.enum(['left', 'bubble']).optional().catch(undefined),
+  conversationListMenu: z
+    .object({
+      pin: z.boolean().default(true),
+      edit: z.boolean().default(true),
+      duplicate: z.boolean().default(true),
+      reorder: z.boolean().default(true),
+      archive: z.boolean().default(true),
+      delete: z.boolean().default(true),
+    })
+    .default({
+      pin: true,
+      edit: true,
+      duplicate: true,
+      reorder: true,
+      archive: true,
+      delete: true,
+    }),
 
   theme: z.nativeEnum(Theme),
   language: z.enum([

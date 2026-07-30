@@ -2,6 +2,7 @@ import { Box, Button, Divider, Stack } from '@mantine/core'
 import { IconArrowDown, IconChevronDown, IconChevronsDown, IconChevronsUp, IconChevronUp } from '@tabler/icons-react'
 import { clsx } from 'clsx'
 import { type CSSProperties, type FC, memo, useCallback, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 
 export type MessageNavigationProps = {
   visible: boolean
@@ -85,22 +86,101 @@ const MessageNavigationButton = ({ icon, ...others }: { icon: React.ReactElement
   )
 }
 
+const floatingNavigationButtonStyle: CSSProperties = {
+  background: 'color-mix(in srgb, var(--chatbox-background-primary) 68%, transparent)',
+  WebkitBackdropFilter: 'blur(14px) saturate(1.1)',
+  backdropFilter: 'blur(14px) saturate(1.1)',
+}
+
+function FloatingNavigationButton(props: {
+  label: string
+  icon: React.ReactElement
+  onClick?: () => void
+  style?: CSSProperties
+}) {
+  return (
+    <Button
+      aria-label={props.label}
+      title={props.label}
+      w={40}
+      h={40}
+      radius={20}
+      p={0}
+      c="chatbox-primary"
+      className="border border-solid border-chatbox-border-primary shadow-lg transition-colors hover:bg-chatbox-background-secondary"
+      onClick={props.onClick}
+      style={{ ...floatingNavigationButtonStyle, ...props.style }}
+    >
+      {props.icon}
+    </Button>
+  )
+}
+
+export type MobileMessageNavigationProps = {
+  showScrollToTop: boolean
+  showScrollToPrev: boolean
+  showScrollToBottom: boolean
+  onScrollToTop?: () => void
+  onScrollToPrev?: () => void
+  onScrollToBottom?: () => void
+}
+
+export function MobileMessageNavigation(props: MobileMessageNavigationProps) {
+  const { t } = useTranslation()
+  const items = [
+    {
+      id: 'top',
+      visible: props.showScrollToTop,
+      label: t('Return to the top'),
+      icon: <IconChevronsUp size={20} />,
+      onClick: props.onScrollToTop,
+    },
+    {
+      id: 'previous',
+      visible: props.showScrollToPrev,
+      label: t('Back to previous message'),
+      icon: <IconChevronUp size={20} />,
+      onClick: props.onScrollToPrev,
+    },
+    {
+      id: 'bottom',
+      visible: props.showScrollToBottom,
+      label: t('Scroll to bottom'),
+      icon: <IconArrowDown size={20} />,
+      onClick: props.onScrollToBottom,
+    },
+  ]
+
+  return (
+    <Stack className="mobile-message-navigation absolute bottom-5 right-3 z-10" gap={8}>
+      {items.map((item) => (
+        <Box
+          key={item.id}
+          className={clsx(
+            'transition-[opacity,transform] duration-200 ease-out',
+            item.visible
+              ? 'pointer-events-auto translate-x-0 scale-100 opacity-100'
+              : 'pointer-events-none translate-x-3 scale-90 opacity-0'
+          )}
+        >
+          <FloatingNavigationButton label={item.label} icon={item.icon} onClick={item.onClick} />
+        </Box>
+      ))}
+    </Stack>
+  )
+}
+
 export const ScrollToBottomButton = ({ onClick, style }: { onClick?(): void; style?: CSSProperties }) => {
+  const { t } = useTranslation()
+
   return (
     <Box className="mobile-scroll-to-bottom-button absolute bottom-5 right-2">
-      <Button
-        w={38}
-        h={38}
-        radius={19}
-        p={0}
-        bg="var(--chatbox-background-primary)"
-        c="chatbox-primary"
-        className="shadow-xl border-chatbox-border-primary"
+      <FloatingNavigationButton
+        label={t('Scroll to bottom')}
+        icon={<IconArrowDown size={20} />}
         onClick={onClick}
         style={style}
-      >
-        <IconArrowDown size={20} />
-      </Button>
+      />
     </Box>
   )
 }

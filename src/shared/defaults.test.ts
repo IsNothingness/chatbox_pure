@@ -16,6 +16,14 @@ describe('defaults', () => {
     expect(result.showTokenCount).toBe(false)
     expect(result.showTokenUsed).toBe(true)
     expect(result.messageLayout).toBe('bubble')
+    expect(result.conversationListMenu).toEqual({
+      pin: true,
+      edit: true,
+      duplicate: true,
+      reorder: true,
+      archive: true,
+      delete: true,
+    })
   })
 
   it('settings() disables reporting and tracking by default', () => {

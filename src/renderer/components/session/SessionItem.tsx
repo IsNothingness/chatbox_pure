@@ -6,6 +6,7 @@ import {
   IconArrowsMoveVertical,
   IconCopy,
   IconDotsVertical,
+  IconEdit,
   IconPinned,
   IconPinnedFilled,
   IconTrash,
@@ -26,6 +27,7 @@ import {
   updateSession as updateSessionStore,
 } from '@/stores/chatStore'
 import { copyAndSwitchSession, switchCurrentSession } from '@/stores/sessionActions'
+import { useSettingsStore } from '@/stores/settingsStore'
 import * as toastActions from '@/stores/toastActions'
 import { useUIStore } from '@/stores/uiStore'
 import ActionMenu, { type ActionMenuItemProps } from '../ActionMenu'
@@ -60,6 +62,7 @@ function SessionItem(props: Props) {
   const { t } = useTranslation()
   const pinActionLabel = session.starred ? t('Unpin') : t('Pin')
   const archiveActionLabel = t('Archive')
+  const conversationListMenu = useSettingsStore((state) => state.conversationListMenu)
   const setShowSidebar = useUIStore((s) => s.setShowSidebar)
   const onClick = () => {
     if (props.isReordering && props.onSelectWhileReordering?.() === false) {
@@ -167,6 +170,14 @@ function SessionItem(props: Props) {
     }
   }
 
+  const editCurrentSession = async () => {
+    const fullSession = await getSession(session.id)
+    if (!fullSession) {
+      return
+    }
+    await NiceModal.show('session-settings', { session: fullSession })
+  }
+
   const handlePointerLeave = () => {
     setActionTooltipDismissed(false)
   }
@@ -182,37 +193,56 @@ function SessionItem(props: Props) {
     setMobileMenuOpened(opened)
   }
 
-  const mobileMenuItems: ActionMenuItemProps[] = [
-    {
+  const mobileMenuItems: ActionMenuItemProps[] = []
+
+  if (conversationListMenu.pin) {
+    mobileMenuItems.push({
       text: pinActionLabel || '',
       icon: session.starred ? IconPinnedFilled : IconPinned,
       onClick: () => {
         void updateSessionStore(session.id, { starred: !session.starred })
       },
-    },
-    {
+    })
+  }
+  if (conversationListMenu.edit) {
+    mobileMenuItems.push({
+      text: t('Edit Conversation') || '',
+      icon: IconEdit,
+      onClick: () => {
+        void editCurrentSession()
+      },
+    })
+  }
+  if (conversationListMenu.duplicate) {
+    mobileMenuItems.push({
       text: t('Duplicate Conversation') || '',
       icon: IconCopy,
       disabled: copying,
       onClick: () => {
         void copyCurrentSession()
       },
-    },
-    {
+    })
+  }
+  if (conversationListMenu.reorder) {
+    mobileMenuItems.push({
       text: t('Adjust order') || '',
       icon: IconArrowsMoveVertical,
       disabled: !props.onStartReordering,
       onClick: props.onStartReordering,
-    },
-    {
+    })
+  }
+  if (conversationListMenu.archive) {
+    mobileMenuItems.push({
       text: archiveActionLabel || '',
       icon: IconArchive,
       disabled: archiving,
       onClick: () => {
         void archiveCurrentSession()
       },
-    },
-    {
+    })
+  }
+  if (conversationListMenu.delete) {
+    mobileMenuItems.push({
       text: t('Delete') || '',
       icon: IconTrash,
       color: 'chatbox-error',
@@ -225,8 +255,9 @@ function SessionItem(props: Props) {
       onClick: () => {
         void deleteCurrentSession()
       },
-    },
-  ]
+    })
+  }
+  const hasMobileMenuItems = mobileMenuItems.length > 0
 
   const content = (
     <Flex
@@ -265,7 +296,7 @@ function SessionItem(props: Props) {
         {session.name}
       </Text>
 
-      {isSmallScreen && !props.isReordering && (
+      {isSmallScreen && !props.isReordering && hasMobileMenuItems && (
         <ActionIcon
           aria-label={t('More')}
           variant="transparent"
@@ -337,7 +368,7 @@ function SessionItem(props: Props) {
     </Flex>
   )
 
-  if (!isSmallScreen) {
+  if (!isSmallScreen || !hasMobileMenuItems) {
     return content
   }
 

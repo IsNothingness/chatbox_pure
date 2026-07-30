@@ -1,12 +1,10 @@
 import NiceModal from '@ebay/nice-modal-react'
-import { ActionIcon, Button, Flex, Stack, Text, Transition } from '@mantine/core'
+import { ActionIcon, Flex, Stack, Text } from '@mantine/core'
 import { useThrottledCallback } from '@mantine/hooks'
 import type { Session, Message as SessionMessage, SessionThreadBrief } from '@shared/types'
 import { getMessageText } from '@shared/utils/message'
 import {
   IconAlignRight,
-  IconArrowBarToUp,
-  IconArrowUp,
   IconChevronLeft,
   IconChevronRight,
   IconListTree,
@@ -50,12 +48,11 @@ import { useUIStore } from '@/stores/uiStore'
 import ActionMenu from '../ActionMenu'
 
 import { ErrorBoundary } from '../common/ErrorBoundary'
-import { ScalableIcon } from '../common/ScalableIcon'
 import { BlockCodeCollapsedStateProvider } from '../Markdown'
 import ForkMarkerMessage from './ForkMarkerMessage'
 import Message from './Message'
 import MessageMinimapRail, { type MessageMinimapAnchor } from './MessageMinimapRail'
-import MessageNavigation, { ScrollToBottomButton } from './MessageNavigation'
+import MessageNavigation, { MobileMessageNavigation } from './MessageNavigation'
 import { isUserNavigationMessage } from './message-navigation-utils'
 import SummaryMessage from './SummaryMessage'
 import { createSmoothFollowOutputController } from './smooth-follow-output'
@@ -76,6 +73,14 @@ function setScrollPosition(sessionId: string, snapshot: StateSnapshot) {
       sessionScrollPositionCache.delete(firstKey)
     }
   }
+}
+
+function MobileMessageListDockSpacer() {
+  return <div aria-hidden className="mobile-message-list-dock-spacer" />
+}
+
+const floatingDockVirtuosoComponents = {
+  Footer: MobileMessageListDockSpacer,
 }
 
 // Export cleanup function for use when sessions are deleted
@@ -108,7 +113,6 @@ type MessageRenderItem =
     }
 
 const MessageList = forwardRef<MessageListRef, MessageListProps>((props, ref) => {
-  const { t } = useTranslation()
   const isSmallScreen = useIsSmallScreen()
   const widthFull = useUIStore((s) => s.widthFull)
 
@@ -508,13 +512,7 @@ const MessageList = forwardRef<MessageListRef, MessageListProps>((props, ref) =>
                   initialTopMostItemIndex: renderItems.length - 1,
                 })}
             increaseViewportBy={{ top: 2000, bottom: 2000 }}
-            components={
-              props.hasFloatingInputDock
-                ? {
-                    Footer: () => <div aria-hidden className="mobile-message-list-dock-spacer" />,
-                  }
-                : undefined
-            }
+            components={props.hasFloatingInputDock ? floatingDockVirtuosoComponents : undefined}
             itemContent={(index, item) => {
               const itemClassName = widthFull ? 'w-full' : 'max-w-4xl mx-auto'
               const isFirstItem = index === 0
@@ -570,45 +568,14 @@ const MessageList = forwardRef<MessageListRef, MessageListProps>((props, ref) =>
               onScrollToNext={handleScrollToNext}
             />
           ) : (
-            <>
-              <Transition mounted={showScrollToPrev && !atTop} transition="fade-down">
-                {(transitionStyle) => (
-                  <Flex
-                    style={transitionStyle}
-                    className="absolute z-10 top-0 left-0 right-0 leading-tight bg-chatbox-background-secondary"
-                  >
-                    {[
-                      { text: t('Return to the top'), icon: IconArrowBarToUp, onClick: handleScrollToTop },
-                      {
-                        text: t('Back to previous message'),
-                        icon: IconArrowUp,
-                        onClick: handleScrollToPrev,
-                      },
-                    ].map((item, idx) => (
-                      <Button
-                        key={item.text}
-                        variant="transparent"
-                        className={cn('w-1/2', idx === 0 ? 'border-r border-r-chatbox-border-primary' : '')}
-                        classNames={{
-                          section: '!mr-xxs',
-                        }}
-                        size="xs"
-                        h="auto"
-                        py={6}
-                        c="chatbox-tertiary"
-                        onClick={item.onClick}
-                        leftSection={<ScalableIcon icon={item.icon} size={16} />}
-                      >
-                        {item.text}
-                      </Button>
-                    ))}
-                  </Flex>
-                )}
-              </Transition>
-              <Transition mounted={!atBottom} transition="slide-up">
-                {(transitionStyle) => <ScrollToBottomButton onClick={handleScrollToBottom} style={transitionStyle} />}
-              </Transition>
-            </>
+            <MobileMessageNavigation
+              showScrollToTop={showScrollToPrev && !atTop}
+              showScrollToPrev={showScrollToPrev && !atTop}
+              showScrollToBottom={!atBottom}
+              onScrollToTop={handleScrollToTop}
+              onScrollToPrev={handleScrollToPrev}
+              onScrollToBottom={handleScrollToBottom}
+            />
           )}
         </div>
       </BlockCodeCollapsedStateProvider>

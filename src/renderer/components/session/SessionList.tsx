@@ -25,7 +25,7 @@ import { IconArrowsMoveVertical, IconLoader2 } from '@tabler/icons-react'
 import { useRouterState } from '@tanstack/react-router'
 import { type CSSProperties, type MutableRefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { type ScrollSeekPlaceholderProps, Virtuoso } from 'react-virtuoso'
+import { Virtuoso } from 'react-virtuoso'
 import { useIsSmallScreen } from '@/hooks/useScreenChange'
 import platform from '@/platform'
 import { reorderSessions } from '@/stores/sessionActions'
@@ -47,26 +47,15 @@ function SessionListLoadingFooter() {
 
 function SessionListPlaceholder(props: { height?: number }) {
   return (
-    <div
-      aria-hidden
-      className="mx-2 rounded-sm bg-chatbox-background-gray-secondary opacity-35"
-      style={{ height: props.height ?? 48 }}
-    />
+    <div aria-hidden className="mx-2 flex items-center gap-2 rounded-sm px-2" style={{ height: props.height ?? 48 }}>
+      <div className="h-7 w-7 shrink-0 rounded-full bg-chatbox-background-gray-secondary opacity-70" />
+      <div className="h-3 w-2/3 rounded-full bg-chatbox-background-gray-secondary opacity-70" />
+    </div>
   )
 }
 
-function SessionListScrollSeekPlaceholder(props: ScrollSeekPlaceholderProps) {
-  return <SessionListPlaceholder height={props.height} />
-}
-
-const virtuosoComponents = {
-  ScrollSeekPlaceholder: SessionListScrollSeekPlaceholder,
-}
-
-const scrollSeekConfiguration = {
-  enter: (velocity: number) => Math.abs(velocity) > 800,
-  exit: (velocity: number) => Math.abs(velocity) < 120,
-}
+const SESSION_LIST_RENDER_AHEAD_PX = 1_152
+const SESSION_LIST_MIN_OVERSCAN_ITEMS = 24
 
 export default function SessionList(props: Props) {
   const { t } = useTranslation()
@@ -200,6 +189,14 @@ export default function SessionList(props: Props) {
                 : {}),
             }}
             totalCount={sparseList.displayCount}
+            increaseViewportBy={{
+              top: SESSION_LIST_RENDER_AHEAD_PX,
+              bottom: SESSION_LIST_RENDER_AHEAD_PX,
+            }}
+            minOverscanItemCount={{
+              top: SESSION_LIST_MIN_OVERSCAN_ITEMS,
+              bottom: SESSION_LIST_MIN_OVERSCAN_ITEMS,
+            }}
             computeItemKey={(displayIndex) => {
               const slot = sparseList.getSlot(displayIndex)
               if (!slot) return `empty:${displayIndex}`
@@ -212,8 +209,6 @@ export default function SessionList(props: Props) {
               }
             }}
             rangeChanged={sparseList.onRangeChanged}
-            components={virtuosoComponents}
-            scrollSeekConfiguration={scrollSeekConfiguration}
             itemContent={(displayIndex) => {
               const slot = sparseList.getSlot(displayIndex)
               if (!slot) return <SessionListPlaceholder />

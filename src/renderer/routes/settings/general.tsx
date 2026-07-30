@@ -145,6 +145,67 @@ export function RouteComponent() {
             </Flex>
           </Radio.Group>
         </Stack>
+
+        <Stack gap="xs">
+          <Text>{t('Conversation item menu')}</Text>
+          <Text size="xs" c="chatbox-tertiary">
+            {t('Choose which actions appear in the conversation three-dot menu.')}
+          </Text>
+          <Switch
+            label={t('Pin or unpin')}
+            checked={settings.conversationListMenu.pin}
+            onChange={(event) =>
+              setSettings((state) => {
+                state.conversationListMenu.pin = event.currentTarget.checked
+              })
+            }
+          />
+          <Switch
+            label={t('Edit Conversation')}
+            checked={settings.conversationListMenu.edit}
+            onChange={(event) =>
+              setSettings((state) => {
+                state.conversationListMenu.edit = event.currentTarget.checked
+              })
+            }
+          />
+          <Switch
+            label={t('Duplicate Conversation')}
+            checked={settings.conversationListMenu.duplicate}
+            onChange={(event) =>
+              setSettings((state) => {
+                state.conversationListMenu.duplicate = event.currentTarget.checked
+              })
+            }
+          />
+          <Switch
+            label={t('Adjust order')}
+            checked={settings.conversationListMenu.reorder}
+            onChange={(event) =>
+              setSettings((state) => {
+                state.conversationListMenu.reorder = event.currentTarget.checked
+              })
+            }
+          />
+          <Switch
+            label={t('Archive')}
+            checked={settings.conversationListMenu.archive}
+            onChange={(event) =>
+              setSettings((state) => {
+                state.conversationListMenu.archive = event.currentTarget.checked
+              })
+            }
+          />
+          <Switch
+            label={t('Delete')}
+            checked={settings.conversationListMenu.delete}
+            onChange={(event) =>
+              setSettings((state) => {
+                state.conversationListMenu.delete = event.currentTarget.checked
+              })
+            }
+          />
+        </Stack>
       </Stack>
 
       <Divider />
