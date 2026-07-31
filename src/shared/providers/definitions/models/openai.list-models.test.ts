@@ -70,7 +70,17 @@ describe('OpenAI listModels', () => {
         JSON.stringify({
           object: 'list',
           data: [
-            { id: 'coder-model', object: 'model', created: 0 },
+            {
+              id: 'coder-model',
+              object: 'model',
+              created: 0,
+              reasoning: {
+                supported_efforts: ['high', 'low'],
+                default_effort: 'high',
+                default_enabled: true,
+                mandatory: true,
+              },
+            },
             { id: 'vision-model', object: 'model', created: 0 },
           ],
         }),
@@ -90,6 +100,13 @@ describe('OpenAI listModels', () => {
 
     expect(customFetch).toHaveBeenCalledOnce()
     expect(models.map((model) => model.modelId)).toEqual(['coder-model', 'vision-model'])
+    expect(models[0].reasoning).toEqual({
+      supportedEfforts: ['high', 'low'],
+      defaultEffort: 'high',
+      defaultEnabled: true,
+      supportsMaxTokens: undefined,
+      mandatory: true,
+    })
   })
 
   it('falls back to configured models when remote fetch fails', async () => {

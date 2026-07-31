@@ -16,6 +16,8 @@ describe('defaults', () => {
     expect(result.showTokenCount).toBe(false)
     expect(result.showTokenUsed).toBe(true)
     expect(result.messageLayout).toBe('bubble')
+    expect(result.keepGeneratingInBackground).toBe(true)
+    expect(result.notifyWhenGenerationCompletes).toBe(false)
     expect(result.conversationListMenu).toEqual({
       pin: true,
       edit: true,

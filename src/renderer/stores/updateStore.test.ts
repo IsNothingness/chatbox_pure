@@ -8,6 +8,8 @@ function resetStore() {
     progress: 0,
     version: null,
     downloadUrl: null,
+    sha256: null,
+    size: null,
     error: null,
     dismissedVersion: null,
   })
@@ -38,7 +40,11 @@ describe('updateStore', () => {
             publishedAt: '2026-07-29T00:00:00Z',
             releasePage: 'https://example.com/releases/latest',
             packages: {
-              android: { url: 'https://example.com/pure.apk' },
+              android: {
+                url: 'https://example.com/pure.apk',
+                sha256: 'a'.repeat(64),
+                size: 123456,
+              },
             },
           }),
         })
@@ -50,6 +56,36 @@ describe('updateStore', () => {
         status: 'available',
         version: '2.0.0',
         downloadUrl: 'https://example.com/pure.apk',
+        sha256: 'a'.repeat(64),
+        size: 123456,
+      })
+    })
+
+    it('rejects an Android release that has no package hash', async () => {
+      vi.spyOn(platform, 'getVersion').mockResolvedValue('1.0.0')
+      vi.spyOn(platform, 'getPlatform').mockResolvedValue('android')
+      vi.spyOn(platform, 'getArch').mockResolvedValue('arm64')
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => ({
+            schemaVersion: 1,
+            version: '2.0.0',
+            publishedAt: '2026-07-29T00:00:00Z',
+            releasePage: 'https://example.com/releases/latest',
+            packages: {
+              android: { url: 'https://example.com/pure.apk', size: 123456 },
+            },
+          }),
+        })
+      )
+
+      await checkForPureUpdate()
+
+      expect(useUpdateStore.getState()).toMatchObject({
+        status: 'error',
+        version: null,
       })
     })
 
@@ -64,7 +100,13 @@ describe('updateStore', () => {
             version: '2.0.0',
             publishedAt: '2026-07-29T00:00:00Z',
             releasePage: 'https://example.com/releases/latest',
-            packages: {},
+            packages: {
+              android: {
+                url: 'https://example.com/pure.apk',
+                sha256: 'a'.repeat(64),
+                size: 123456,
+              },
+            },
           }),
         })
       )

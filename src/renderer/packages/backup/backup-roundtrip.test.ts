@@ -246,6 +246,8 @@ describe('ZIP backup round trip', () => {
       defaultAssistantAvatarKey: 'picture:kept',
       licenseKey: 'secret-license',
       providers: { custom: { apiKey: 'secret-api-key', apiHost: 'https://example.com' } },
+      keepGeneratingInBackground: true,
+      notifyWhenGenerationCompletes: true,
       conversationListMenu: {
         pin: false,
         edit: true,
@@ -295,6 +297,8 @@ describe('ZIP backup round trip', () => {
     expect(destination.values.get(BackupStorageKey.Settings)).toEqual({
       defaultAssistantAvatarKey: 'picture:kept',
       providers: { custom: { apiHost: 'https://example.com' } },
+      keepGeneratingInBackground: true,
+      notifyWhenGenerationCompletes: true,
       conversationListMenu: {
         pin: false,
         edit: true,

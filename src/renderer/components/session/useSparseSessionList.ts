@@ -17,7 +17,10 @@ import {
 } from './session-list-window'
 
 const COLD_SWEEP_INTERVAL_MS = 5_000
-const SCROLL_IDLE_SWEEP_DELAY_MS = 500
+const SCROLL_IDLE_SWEEP_DELAY_MS = 1_500
+const SCROLL_ACTIVE_EVICTION_GRACE_MS = 1_200
+const PREFETCH_SCHEDULE_DELAY_MS = 24
+const PREFETCH_WORKER_COUNT = 2
 const MAX_CACHED_PAGES = 20
 
 type PageLoadKind = 'visible' | 'prefetch'
@@ -70,13 +73,20 @@ export function useSparseSessionList(options: { pauseEviction: boolean }): Spars
     speedItemsPerSecond: 0,
   })
   const idleSweepTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const prefetchScheduleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const prefetchGenerationRef = useRef(0)
+  const cachePublishFrameRef = useRef<number | null>(null)
   const [cacheVersion, setCacheVersion] = useState(0)
   const [total, setTotal] = useState(0)
   const [pinnedCount, setPinnedCount] = useState(0)
   const [isInitializing, setIsInitializing] = useState(true)
 
   const publishCacheChange = useCallback(() => {
-    setCacheVersion((version) => version + 1)
+    if (cachePublishFrameRef.current !== null) return
+    cachePublishFrameRef.current = requestAnimationFrame(() => {
+      cachePublishFrameRef.current = null
+      setCacheVersion((version) => version + 1)
+    })
   }, [])
 
   const requestPage = useCallback(
@@ -140,6 +150,11 @@ export function useSparseSessionList(options: { pauseEviction: boolean }): Spars
     pagesRef.current.clear()
     pageUsageRef.current.clear()
     inflightRef.current.clear()
+    prefetchGenerationRef.current += 1
+    if (prefetchScheduleTimerRef.current) {
+      clearTimeout(prefetchScheduleTimerRef.current)
+      prefetchScheduleTimerRef.current = null
+    }
     totalRef.current = 0
     visibleRangeRef.current = { start: 0, end: 0 }
     motionRef.current = {
@@ -197,6 +212,7 @@ export function useSparseSessionList(options: { pauseEviction: boolean }): Spars
     const visible = visibleRangeRef.current
     const motion = motionRef.current
     const motionIdleMs = motion.lastAt > 0 ? performance.now() - motion.lastAt : Number.POSITIVE_INFINITY
+    if (motionIdleMs < SCROLL_ACTIVE_EVICTION_GRACE_MS) return
     const effectiveSpeed = motionIdleMs < 1_000 ? motion.speedItemsPerSecond : 0
     const removable: Array<{ pageStart: number; distance: number }> = []
 
@@ -257,6 +273,12 @@ export function useSparseSessionList(options: { pauseEviction: boolean }): Spars
   useEffect(
     () => () => {
       if (idleSweepTimerRef.current) clearTimeout(idleSweepTimerRef.current)
+      if (prefetchScheduleTimerRef.current) clearTimeout(prefetchScheduleTimerRef.current)
+      prefetchGenerationRef.current += 1
+      if (cachePublishFrameRef.current !== null) {
+        cancelAnimationFrame(cachePublishFrameRef.current)
+        cachePublishFrameRef.current = null
+      }
     },
     []
   )
@@ -295,9 +317,20 @@ export function useSparseSessionList(options: { pauseEviction: boolean }): Spars
       const pageStarts = getPageStartsForRange(prefetchRange, SESSION_PAGE_SIZE).sort(
         (a, b) => Math.abs(a - visibleCenter) - Math.abs(b - visibleCenter)
       )
-      for (const pageStart of pageStarts) {
-        void requestPage(pageStart, 'prefetch')
+      if (prefetchScheduleTimerRef.current) {
+        clearTimeout(prefetchScheduleTimerRef.current)
       }
+      const prefetchGeneration = ++prefetchGenerationRef.current
+      prefetchScheduleTimerRef.current = setTimeout(() => {
+        prefetchScheduleTimerRef.current = null
+        const runWorker = async (workerIndex: number) => {
+          for (let index = workerIndex; index < pageStarts.length; index += PREFETCH_WORKER_COUNT) {
+            if (prefetchGeneration !== prefetchGenerationRef.current) return
+            await requestPage(pageStarts[index], 'prefetch')
+          }
+        }
+        void Promise.all(Array.from({ length: PREFETCH_WORKER_COUNT }, (_, workerIndex) => runWorker(workerIndex)))
+      }, PREFETCH_SCHEDULE_DELAY_MS)
 
       if (idleSweepTimerRef.current) clearTimeout(idleSweepTimerRef.current)
       idleSweepTimerRef.current = setTimeout(sweepColdPages, SCROLL_IDLE_SWEEP_DELAY_MS)

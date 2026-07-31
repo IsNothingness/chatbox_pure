@@ -20,6 +20,8 @@ import {
   trackAgentModeSuggested,
   trackWorkModeSuggestionDecision,
 } from '@/analytics/agent-mode'
+import i18n from '@/i18n'
+import { showGenerationCompleteNotification } from '@/native/stream-http'
 import { AppActionApprovalPausedError } from '@/packages/app-action-approval'
 import * as appleAppStore from '@/packages/apple_app_store'
 import { wakeBackgroundTaskFollowUps } from '@/packages/chatbox-cli/background-follow-up'
@@ -715,6 +717,17 @@ export async function orchestrateGeneration(
     }
 
     await persistStreamingMessage(sessionId, targetMsg, { refreshCounting: true })
+    if (
+      platform.type === 'mobile' &&
+      globalSettings.keepGeneratingInBackground &&
+      globalSettings.notifyWhenGenerationCompletes &&
+      !(await platform.isWindowFocused())
+    ) {
+      await showGenerationCompleteNotification(
+        i18n.t('Reply generated'),
+        i18n.t('Tap to return to ChatBox Pure and view the reply.')
+      )
+    }
     appleAppStore.tickAfterMessageGenerated()
   } catch (err: unknown) {
     const pause = getToolCallPause(err)

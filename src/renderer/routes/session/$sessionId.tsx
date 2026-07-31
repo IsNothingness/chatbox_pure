@@ -14,6 +14,7 @@ import Header from '@/components/layout/Header'
 import Page from '@/components/layout/Page'
 import ThreadHistoryDrawer from '@/components/session/ThreadHistoryDrawer'
 import { useProviders } from '@/hooks/useProviders'
+import { useChatSidebarSwipe } from '@/hooks/useChatSidebarSwipe'
 import { useIsSmallScreen } from '@/hooks/useScreenChange'
 import useVersion from '@/hooks/useVersion'
 import { defaultSessionsForCN, defaultSessionsForEN } from '@/packages/initial_data'
@@ -42,6 +43,7 @@ function RouteComponent() {
   const { sessionId: currentSessionId } = Route.useParams()
   const navigate = useNavigate()
   const isSmallScreen = useIsSmallScreen()
+  useChatSidebarSwipe()
   const { session: currentSession, isFetching } = useSession(currentSessionId)
   const { providers } = useProviders()
   const licenseKey = useSettingsStore((s) => s.licenseKey)

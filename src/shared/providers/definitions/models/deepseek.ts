@@ -1,4 +1,4 @@
-import { createDeepSeek, type DeepSeekChatOptions } from '@ai-sdk/deepseek'
+import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
 import type { LanguageModelV3 } from '@ai-sdk/provider'
 import AbstractAISDKModel, { type CallSettings } from '../../../models/abstract-ai-sdk'
 import { ApiError } from '../../../models/errors'
@@ -27,18 +27,21 @@ export default class DeepSeek extends AbstractAISDKModel {
   }
 
   protected getProvider() {
-    return createDeepSeek({
+    return createOpenAICompatible({
+      name: 'deepseek',
       apiKey: this.options.apiKey,
+      baseURL: 'https://api.deepseek.com',
     })
   }
 
   protected getChatModel(_options: CallChatCompletionOptions): LanguageModelV3 {
     const provider = this.getProvider()
-    return provider.chat(this.options.model.modelId)
+    return provider.languageModel(this.options.model.modelId)
   }
 
   protected getCallSettings(options: CallChatCompletionOptions): CallSettings {
     const thinkingType = options.providerOptions?.deepseek?.thinking?.type
+    const reasoningEffort = options.providerOptions?.deepseek?.reasoningEffort
     const isThinkingMode = this.isSupportReasoning() && thinkingType !== 'disabled'
     const settings: CallSettings = {
       maxOutputTokens: this.options.maxOutputTokens,
@@ -50,13 +53,12 @@ export default class DeepSeek extends AbstractAISDKModel {
       settings.topP = this.options.topP
     }
 
-    if (this.isSupportReasoning() && thinkingType) {
+    if (this.isSupportReasoning() && (thinkingType || reasoningEffort)) {
       settings.providerOptions = {
         deepseek: {
-          thinking: {
-            type: thinkingType,
-          },
-        } satisfies DeepSeekChatOptions,
+          ...(thinkingType ? { thinking: { type: thinkingType } } : {}),
+          ...(reasoningEffort ? { reasoningEffort } : {}),
+        },
       }
     }
 

@@ -274,10 +274,10 @@ function SessionItem(props: Props) {
             ? 'bg-chatbox-background-brand-secondary'
             : 'hover:bg-chatbox-background-gray-secondary'
       )}
+      h={48}
       mx="xs"
       pl="xs"
       pr={props.isReordering ? 44 : 'xs'}
-      py={10}
       gap={10}
       onClick={onClick}
       onContextMenu={handleContextMenu}

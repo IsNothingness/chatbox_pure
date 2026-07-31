@@ -13,6 +13,29 @@ import type { SessionAttachmentRagController } from './session-attachment-rag/in
 
 export type PlatformType = 'web' | 'desktop' | 'mobile'
 
+export type NativeUpdateStatus =
+  | 'idle'
+  | 'permission-required'
+  | 'downloading'
+  | 'verifying'
+  | 'downloaded'
+  | 'installing'
+  | 'error'
+
+export interface NativeUpdatePackage {
+  version: string
+  url: string
+  sha256: string
+  size: number
+}
+
+export interface NativeUpdateState {
+  status: NativeUpdateStatus
+  progress: number
+  version?: string | null
+  error?: string | null
+}
+
 export interface Storage {
   getStorageType(): string
   setStoreValue(key: string, value: any): Promise<void>
@@ -34,6 +57,7 @@ export interface Platform extends Storage {
   getPlatform(): Promise<string>
   getArch(): Promise<string>
   shouldUseDarkColors(): Promise<boolean>
+  setStatusBarStyle?(options: { darkIcons: boolean }): Promise<void>
   onSystemThemeChange(callback: () => void): () => void
   onWindowShow(callback: () => void): () => void
   /**
@@ -134,6 +158,10 @@ export interface Platform extends Storage {
   isFullscreen(): Promise<boolean>
   setFullscreen(enabled: boolean): Promise<void>
   installUpdate(): Promise<void>
+  startNativeUpdate?(updatePackage: NativeUpdatePackage): Promise<NativeUpdateState>
+  resumeNativeUpdate?(): Promise<NativeUpdateState>
+  getNativeUpdateState?(): Promise<NativeUpdateState>
+  onNativeUpdateStateChange?(callback: (state: NativeUpdateState) => void): () => void
 
   getKnowledgeBaseController(): KnowledgeBaseController
   getSessionAttachmentRagController(): SessionAttachmentRagController

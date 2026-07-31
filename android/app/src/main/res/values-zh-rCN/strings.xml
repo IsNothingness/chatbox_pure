@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="background_generation_channel">后台生成</string>
+    <string name="background_generation_channel_description">应用进入后台后继续生成回复</string>
+    <string name="generation_complete_channel">回复生成完成</string>
+    <string name="generation_complete_channel_description">回复生成完成时发送通知</string>
+</resources>

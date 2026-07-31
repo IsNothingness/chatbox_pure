@@ -1,5 +1,6 @@
 import { App } from '@capacitor/app'
 import { Browser } from '@capacitor/browser'
+import { type PluginListenerHandle, registerPlugin } from '@capacitor/core'
 import { Device } from '@capacitor/device'
 import * as defaults from '@shared/defaults'
 import type { Config, Settings, ShortcutSetting } from '@shared/types'
@@ -12,13 +13,40 @@ import { SQLiteImageGenerationStorage } from '@/storage/SQLiteImageGenerationSto
 import { SQLiteSessionMetaStorage } from '@/storage/SQLiteSessionMetaStorage'
 import { CHATBOX_BUILD_PLATFORM } from '@/variables'
 import { getBrowser, getOS } from '../packages/navigator'
-import type { Platform, PlatformType } from './interfaces'
+import type { NativeUpdatePackage, NativeUpdateState, Platform, PlatformType } from './interfaces'
 import type { KnowledgeBaseController } from './knowledge-base/interface'
 import MobileExporter from './mobile_exporter'
 import mobileLogger from './mobile_logger'
 import type { SessionAttachmentRagController } from './session-attachment-rag/interface'
 import { MobileSQLiteStorage } from './storages'
 import { parseFileLocallyInBrowser } from './web_platform_utils'
+
+interface SystemThemeState {
+  dark: boolean
+}
+
+interface SystemThemePlugin {
+  getCurrentTheme(): Promise<SystemThemeState>
+  setStatusBarStyle(options: { darkIcons: boolean }): Promise<void>
+  addListener(
+    eventName: 'systemThemeChanged',
+    listenerFunc: (state: SystemThemeState) => void
+  ): Promise<PluginListenerHandle>
+}
+
+const SystemTheme = registerPlugin<SystemThemePlugin>('SystemTheme')
+
+interface AppUpdatePlugin {
+  startUpdate(updatePackage: NativeUpdatePackage): Promise<NativeUpdateState>
+  resumeUpdate(): Promise<NativeUpdateState>
+  getState(): Promise<NativeUpdateState>
+  addListener(
+    eventName: 'stateChanged',
+    listenerFunc: (state: NativeUpdateState) => void
+  ): Promise<PluginListenerHandle>
+}
+
+const AppUpdate = registerPlugin<AppUpdatePlugin>('AppUpdate')
 
 export default class MobilePlatform extends MobileSQLiteStorage implements Platform {
   public type: PlatformType = 'mobile'
@@ -92,12 +120,48 @@ export default class MobilePlatform extends MobileSQLiteStorage implements Platf
     return 'arm64'
   }
   public async shouldUseDarkColors(): Promise<boolean> {
-    return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+    if (CHATBOX_BUILD_PLATFORM === 'android') {
+      try {
+        return (await SystemTheme.getCurrentTheme()).dark
+      } catch (error) {
+        console.warn('Failed to read native Android system theme:', error)
+      }
+    }
+    return window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false
+  }
+  public async setStatusBarStyle(options: { darkIcons: boolean }): Promise<void> {
+    if (CHATBOX_BUILD_PLATFORM !== 'android') return
+    try {
+      await SystemTheme.setStatusBarStyle(options)
+    } catch (error) {
+      console.warn('Failed to update native Android status bar style:', error)
+    }
   }
   public onSystemThemeChange(callback: () => void): () => void {
-    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', callback)
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
+    let cancelled = false
+    let nativeListener: PluginListenerHandle | undefined
+
+    mediaQuery.addEventListener('change', callback)
+
+    if (CHATBOX_BUILD_PLATFORM === 'android') {
+      SystemTheme.addListener('systemThemeChanged', callback)
+        .then((handle) => {
+          if (cancelled) {
+            void handle.remove()
+            return
+          }
+          nativeListener = handle
+        })
+        .catch((error) => {
+          console.warn('Failed to listen for native Android system theme changes:', error)
+        })
+    }
+
     return () => {
-      window.matchMedia('(prefers-color-scheme: dark)').removeEventListener('change', callback)
+      cancelled = true
+      mediaQuery.removeEventListener('change', callback)
+      void nativeListener?.remove()
     }
   }
   public onWindowShow(callback: () => void): () => void {
@@ -289,6 +353,52 @@ export default class MobilePlatform extends MobileSQLiteStorage implements Platf
 
   installUpdate(): Promise<void> {
     throw new Error('Method not implemented.')
+  }
+
+  public startNativeUpdate(updatePackage: NativeUpdatePackage): Promise<NativeUpdateState> {
+    if (CHATBOX_BUILD_PLATFORM !== 'android') {
+      throw new Error('Native package installation is only available on Android.')
+    }
+    return AppUpdate.startUpdate(updatePackage)
+  }
+
+  public resumeNativeUpdate(): Promise<NativeUpdateState> {
+    if (CHATBOX_BUILD_PLATFORM !== 'android') {
+      throw new Error('Native package installation is only available on Android.')
+    }
+    return AppUpdate.resumeUpdate()
+  }
+
+  public getNativeUpdateState(): Promise<NativeUpdateState> {
+    if (CHATBOX_BUILD_PLATFORM !== 'android') {
+      return Promise.resolve({ status: 'idle', progress: 0 })
+    }
+    return AppUpdate.getState()
+  }
+
+  public onNativeUpdateStateChange(callback: (state: NativeUpdateState) => void): () => void {
+    if (CHATBOX_BUILD_PLATFORM !== 'android') {
+      return () => undefined
+    }
+
+    let cancelled = false
+    let listener: PluginListenerHandle | undefined
+    AppUpdate.addListener('stateChanged', callback)
+      .then((handle) => {
+        if (cancelled) {
+          void handle.remove()
+          return
+        }
+        listener = handle
+      })
+      .catch((error) => {
+        console.warn('Failed to listen for native Android update state:', error)
+      })
+
+    return () => {
+      cancelled = true
+      void listener?.remove()
+    }
   }
 
   public getKnowledgeBaseController(): KnowledgeBaseController {

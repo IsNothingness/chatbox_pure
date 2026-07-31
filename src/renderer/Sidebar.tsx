@@ -1,9 +1,7 @@
 import { registerPlugin } from '@capacitor/core'
-import NiceModal from '@ebay/nice-modal-react'
 import { ActionIcon, Box, Button, Flex, Image, NavLink, Stack, Text, Tooltip } from '@mantine/core'
 import SwipeableDrawer from '@mui/material/SwipeableDrawer'
 import {
-  IconArchive,
   IconCirclePlus,
   IconCode,
   IconDownload,
@@ -15,7 +13,7 @@ import {
 } from '@tabler/icons-react'
 import { useNavigate } from '@tanstack/react-router'
 import clsx from 'clsx'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import Divider from './components/common/Divider'
 import { ScalableIcon } from './components/common/ScalableIcon'
@@ -65,6 +63,7 @@ export default function Sidebar() {
   const isSmallScreen = useIsSmallScreen()
 
   const [isResizing, setIsResizing] = useState(false)
+  const [mobileSidebarContentWidth, setMobileSidebarContentWidth] = useState(320)
   const resizeStartX = useRef<number>(0)
   const resizeStartWidth = useRef<number>(0)
 
@@ -130,6 +129,50 @@ export default function Sidebar() {
     }
   }, [isSmallScreen, showSidebar])
 
+  useEffect(() => {
+    if (!isSmallScreen) return
+    const canvas = document.createElement('canvas')
+    const context = canvas.getContext('2d')
+    if (!context) return
+    context.font = getComputedStyle(document.body).font || '14px sans-serif'
+    const labels = [t('New Chat'), t('Create Image'), t('My Copilots'), t('Settings'), t('Search'), 'Chatbox']
+    const longestLabel = Math.max(...labels.map((label) => context.measureText(label || '').width))
+    setMobileSidebarContentWidth((current) => Math.max(current, Math.ceil(longestLabel + 96)))
+  }, [isSmallScreen, t])
+
+  const updateMobileSidebarContentWidth = useCallback((width: number) => {
+    setMobileSidebarContentWidth((current) => Math.max(current, Math.ceil(width)))
+  }, [])
+
+  const drawerPaperSx = useMemo(() => {
+    if (!isSmallScreen) {
+      return {
+        backgroundColor: 'transparent',
+        backgroundImage: 'none',
+        boxSizing: 'border-box',
+        width: sidebarWidth,
+        maxWidth: '75vw',
+        overflowY: 'initial',
+      } as const
+    }
+    return {
+      display: 'flex',
+      boxSizing: 'border-box',
+      width: `min(${mobileSidebarContentWidth}px, 80vw)`,
+      maxWidth: '80vw',
+      height: '100%',
+      padding: 0,
+      border: 0,
+      background: 'transparent !important',
+      backgroundColor: 'transparent !important',
+      backgroundImage: 'none !important',
+      boxShadow: 'none !important',
+      backdropFilter: 'none !important',
+      WebkitBackdropFilter: 'none !important',
+      overflow: 'visible',
+    } as const
+  }, [isSmallScreen, mobileSidebarContentWidth, sidebarWidth])
+
   return (
     <SwipeableDrawer
       anchor={language === 'ar' ? 'right' : 'left'}
@@ -141,28 +184,29 @@ export default function Sidebar() {
         keepMounted: true, // Better open performance on mobile.
         disableEnforceFocus: true, // 关闭 focus trap，避免在侧边栏打开时弹出的 modal 中 input 无法点击
         sx: getSidebarModalSx(showSidebar),
+        slotProps: isSmallScreen
+          ? {
+              backdrop: {
+                sx: {
+                  backgroundColor: 'rgba(0, 0, 0, 0.28)',
+                  backdropFilter: 'blur(2px)',
+                  WebkitBackdropFilter: 'blur(2px)',
+                },
+              },
+            }
+          : undefined,
       }}
-      sx={{
-        '& .MuiDrawer-paper': {
-          backgroundColor: isSmallScreen ? undefined : 'transparent',
-          backgroundImage: 'none',
-          boxSizing: 'border-box',
-          width: isSmallScreen ? '75vw' : sidebarWidth,
-          maxWidth: '75vw',
-        },
-      }}
+      sx={{ '& .MuiDrawer-paper': drawerPaperSx }}
       SlideProps={language === 'ar' ? { direction: 'left' } : undefined}
-      PaperProps={
-        language === 'ar' ? { sx: { direction: 'rtl', overflowY: 'initial' } } : { sx: { overflowY: 'initial' } }
-      }
+      PaperProps={language === 'ar' ? { sx: { ...drawerPaperSx, direction: 'rtl' } } : { sx: drawerPaperSx }}
       disableSwipeToOpen={CHATBOX_BUILD_PLATFORM !== 'ios'} // 只在iOS设备上启用SwipeToOpen
     >
       <Stack
-        h="100%"
+        h={isSmallScreen ? undefined : '100%'}
         gap={0}
-        pt="var(--mobile-safe-area-inset-top, 0px)"
-        pb="var(--mobile-safe-area-inset-bottom, 0px)"
-        className="relative"
+        pt={isSmallScreen ? 0 : 'var(--mobile-safe-area-inset-top, 0px)'}
+        pb={isSmallScreen ? 0 : 'var(--mobile-safe-area-inset-bottom, 0px)'}
+        className={isSmallScreen ? 'mobile-sidebar-glass mobile-sidebar-floating-panel min-h-0' : 'relative'}
       >
         {needRoomForMacWindowControls && <Box className="title-bar flex-[0_0_44px]" />}
         <Flex
@@ -195,32 +239,26 @@ export default function Sidebar() {
                 <IconSearch size={18} />
               </ActionIcon>
             </Tooltip>
-            <Tooltip label={t('Clear Conversation List')} openDelay={1000} withArrow>
-              <ActionIcon
-                variant="subtle"
-                color="chatbox-tertiary"
-                size={26}
-                radius="md"
-                onClick={() => NiceModal.show('clear-session-list')}
-              >
-                <IconArchive size={18} />
-              </ActionIcon>
-            </Tooltip>
-            <Tooltip label={t('Collapse')} openDelay={1000} withArrow>
-              <ActionIcon
-                variant="subtle"
-                color="chatbox-tertiary"
-                size={26}
-                radius="md"
-                onClick={() => setShowSidebar(false)}
-              >
-                <IconLayoutSidebarLeftCollapse size={18} />
-              </ActionIcon>
-            </Tooltip>
+            {!isSmallScreen && (
+              <Tooltip label={t('Collapse')} openDelay={1000} withArrow>
+                <ActionIcon
+                  variant="subtle"
+                  color="chatbox-tertiary"
+                  size={26}
+                  radius="md"
+                  onClick={() => setShowSidebar(false)}
+                >
+                  <IconLayoutSidebarLeftCollapse size={18} />
+                </ActionIcon>
+              </Tooltip>
+            )}
           </Flex>
         </Flex>
 
-        <SessionList sessionListViewportRef={sessionListViewportRef} />
+        <SessionList
+          sessionListViewportRef={sessionListViewportRef}
+          onContentWidthHint={updateMobileSidebarContentWidth}
+        />
 
         <SidebarUpdateBanner />
 

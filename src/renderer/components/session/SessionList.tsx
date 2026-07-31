@@ -35,6 +35,7 @@ import { useSparseSessionList } from './useSparseSessionList'
 
 export interface Props {
   sessionListViewportRef: MutableRefObject<HTMLDivElement | null>
+  onContentWidthHint?: (width: number) => void
 }
 
 function SessionListLoadingFooter() {
@@ -54,8 +55,10 @@ function SessionListPlaceholder(props: { height?: number }) {
   )
 }
 
+const SESSION_LIST_ITEM_HEIGHT = 48
 const SESSION_LIST_RENDER_AHEAD_PX = 1_152
 const SESSION_LIST_MIN_OVERSCAN_ITEMS = 24
+const SESSION_ITEM_NON_TEXT_WIDTH = 104
 
 export default function SessionList(props: Props) {
   const { t } = useTranslation()
@@ -69,6 +72,15 @@ export default function SessionList(props: Props) {
   const lastDragFinishedAtRef = useRef(0)
   const isSmallScreen = useIsSmallScreen()
   const showSidebar = useUIStore((state) => state.showSidebar)
+  useEffect(() => {
+    if (!isSmallScreen || !props.onContentWidthHint || sortedSessions.length === 0) return
+    const canvas = document.createElement('canvas')
+    const context = canvas.getContext('2d')
+    if (!context) return
+    context.font = getComputedStyle(document.body).font || '14px sans-serif'
+    const longestTitle = Math.max(...sortedSessions.map((session) => context.measureText(session.name || '').width))
+    props.onContentWidthHint(longestTitle + SESSION_ITEM_NON_TEXT_WIDTH)
+  }, [isSmallScreen, props.onContentWidthHint, sortedSessions])
   const touchSensor = useSensor(TouchSensor, {
     activationConstraint: {
       delay: isReordering ? 500 : 800,
@@ -177,7 +189,7 @@ export default function SessionList(props: Props) {
             </Flex>
           )}
           <Virtuoso
-            defaultItemHeight={48}
+            fixedItemHeight={SESSION_LIST_ITEM_HEIGHT}
             style={{
               flex: 1,
               ...(platform.type === 'web'
@@ -214,9 +226,11 @@ export default function SessionList(props: Props) {
               if (!slot) return <SessionListPlaceholder />
               if (slot.type === 'section') {
                 return (
-                  <Text px="md" pt="sm" pb={4} size="xs" fw={600} c="chatbox-tertiary">
-                    {t(slot.label)}
-                  </Text>
+                  <Flex h={SESSION_LIST_ITEM_HEIGHT} align="flex-end" px="md" pb={6}>
+                    <Text size="xs" fw={600} c="chatbox-tertiary">
+                      {t(slot.label)}
+                    </Text>
+                  </Flex>
                 )
               }
               if (!slot.session) return <SessionListPlaceholder />
@@ -260,6 +274,7 @@ function SortableItem(props: { id: string; children?: React.ReactNode; disabled?
     disabled,
   })
   const style: CSSProperties = {
+    height: SESSION_LIST_ITEM_HEIGHT,
     transform: CSS.Transform.toString(transform),
     transition,
     opacity: isDragging ? 0 : undefined,

@@ -190,6 +190,8 @@ describe('settingsStore persistence', () => {
       archive: true,
       delete: true,
     })
+    expect(hydrated.keepGeneratingInBackground).toBe(true)
+    expect(hydrated.notifyWhenGenerationCompletes).toBe(false)
   })
 
   it.each([

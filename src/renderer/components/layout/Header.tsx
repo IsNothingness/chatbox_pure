@@ -57,7 +57,7 @@ export default function Header(props: { session: Session }) {
         h={48}
         align="center"
         px="md"
-        className={clsx('flex-none title-bar', isSmallScreen ? 'bg-chatbox-background-primary' : '')}
+        className={clsx('flex-none title-bar', isSmallScreen ? 'mobile-top-surface' : '')}
       >
         {(!showSidebar || isSmallScreen) && (
           <Flex align="center" className={needRoomForMacWindowControls ? 'pl-20' : ''}>

@@ -13,6 +13,7 @@ export const switchTheme = async (theme: Theme) => {
   } else {
     finalTheme = theme === Theme.Dark ? 'dark' : 'light'
   }
+  await platform.setStatusBarStyle?.({ darkIcons: finalTheme === 'light' })
   uiStore.setState({
     realTheme: finalTheme,
   })
@@ -20,6 +21,7 @@ export const switchTheme = async (theme: Theme) => {
   if (platform instanceof DesktopPlatform) {
     await platform.switchTheme(finalTheme)
   }
+  return finalTheme
 }
 
 export default function useAppTheme() {
@@ -28,13 +30,20 @@ export default function useAppTheme() {
   const language = useLanguage()
 
   useLayoutEffect(() => {
-    switchTheme(theme)
+    void switchTheme(theme)
   }, [theme])
 
   useLayoutEffect(() => {
-    platform.onSystemThemeChange(() => {
+    return platform.onSystemThemeChange(() => {
       const theme = settingsStore.getState().theme
-      switchTheme(theme)
+      void switchTheme(theme)
+    })
+  }, [])
+
+  useLayoutEffect(() => {
+    return platform.onWindowFocused(() => {
+      const theme = settingsStore.getState().theme
+      void switchTheme(theme)
     })
   }, [])
 

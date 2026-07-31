@@ -1,5 +1,6 @@
 package io.github.isnothingness.chatboxpure;
 
+import android.graphics.Insets;
 import android.os.Build;
 import android.view.RoundedCorner;
 import android.view.View;
@@ -41,6 +42,31 @@ public class ScreenGeometryPlugin extends Plugin {
         });
     }
 
+    @PluginMethod
+    public void getSystemGestureInsets(PluginCall call) {
+        getActivity().runOnUiThread(() -> {
+            JSObject result = new JSObject();
+            View decorView = getActivity().getWindow().getDecorView();
+            WindowInsets windowInsets = decorView.getRootWindowInsets();
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || windowInsets == null) {
+                putSystemGestureInsets(result, 0, 0, 0, 0);
+                call.resolve(result);
+                return;
+            }
+
+            float density = getContext().getResources().getDisplayMetrics().density;
+            Insets insets = windowInsets.getSystemGestureInsets();
+            putSystemGestureInsets(
+                result,
+                insets.left / density,
+                insets.top / density,
+                insets.right / density,
+                insets.bottom / density
+            );
+            call.resolve(result);
+        });
+    }
+
     private double radiusInCssPixels(WindowInsets insets, int position, float density) {
         RoundedCorner corner = insets.getRoundedCorner(position);
         return corner == null ? 0 : corner.getRadius() / density;
@@ -51,5 +77,13 @@ public class ScreenGeometryPlugin extends Plugin {
         result.put("topRight", 0);
         result.put("bottomRight", 0);
         result.put("bottomLeft", 0);
+    }
+
+    private void putSystemGestureInsets(JSObject result, double left, double top, double right, double bottom) {
+        result.put("left", left);
+        result.put("top", top);
+        result.put("right", right);
+        result.put("bottom", bottom);
+        result.put("edgeNavigation", left > 0 || right > 0);
     }
 }

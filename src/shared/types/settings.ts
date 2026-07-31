@@ -53,6 +53,19 @@ export const ProviderModelInfoSchema = z.object({
     .catch([]),
   contextWindow: z.number().optional().catch(undefined),
   maxOutput: z.number().optional().catch(undefined),
+  // Optional reasoning metadata advertised by gateways such as OpenRouter.
+  // Keeping this on the model avoids hard-coding a gateway's rapidly changing
+  // model catalogue and lets the UI follow the server's supported effort list.
+  reasoning: z
+    .object({
+      supportedEfforts: z.array(z.string()).nullable().optional().catch(undefined),
+      defaultEffort: z.string().optional().catch(undefined),
+      defaultEnabled: z.boolean().optional().catch(undefined),
+      supportsMaxTokens: z.boolean().optional().catch(undefined),
+      mandatory: z.boolean().optional().catch(undefined),
+    })
+    .optional()
+    .catch(undefined),
 })
 
 export const OAuthCredentialsSchema = z.object({
@@ -125,11 +138,11 @@ const ClaudeParamsSchema = z.object({
     })
     .optional()
     .catch(undefined),
-  effort: z.enum(['low', 'medium', 'high']).optional().catch(undefined),
+  effort: z.string().optional().catch(undefined),
 })
 
 const OpenAIParamsSchema = z.object({
-  reasoningEffort: z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh']).optional().catch(undefined),
+  reasoningEffort: z.string().optional().catch(undefined),
   reasoningSummary: z.enum(['auto', 'concise', 'detailed']).optional().catch(undefined),
   include: z.array(z.string()).optional().catch(undefined),
   forceReasoning: z.boolean().optional().catch(undefined),
@@ -150,10 +163,11 @@ const DeepSeekParamsSchema = z.object({
     })
     .optional()
     .catch(undefined),
+  reasoningEffort: z.string().optional().catch(undefined),
 })
 
 const ReasoningOptionsSchema = z.object({
-  effort: z.enum(['minimal', 'low', 'medium', 'high']).optional().catch(undefined),
+  effort: z.string().optional().catch(undefined),
   max_tokens: z.number().optional().catch(undefined),
   enabled: z.boolean().optional().catch(undefined),
   exclude: z.boolean().optional().catch(undefined),
@@ -161,6 +175,12 @@ const ReasoningOptionsSchema = z.object({
 
 const OpenAICompatibleParamsSchema = z.object({
   reasoningEffort: z.string().optional().catch(undefined),
+  thinking: z
+    .object({
+      type: z.enum(['enabled', 'disabled']),
+    })
+    .optional()
+    .catch(undefined),
   reasoning: ReasoningOptionsSchema.optional().catch(undefined),
   include: z.array(z.string()).optional().catch(undefined),
   enable_thinking: z.boolean().optional().catch(undefined),
@@ -505,6 +525,10 @@ export const SettingsSchema = GlobalSessionSettingsSchema.extend({
   spellCheck: z.boolean().optional(),
 
   startupPage: z.enum(['home', 'session']).optional(),
+
+  // Android generation lifecycle and notifications
+  keepGeneratingInBackground: z.boolean().default(true),
+  notifyWhenGenerationCompletes: z.boolean().default(false),
 
   // disableQuickToggleShortcut?: boolean // 是否关闭快捷键切换窗口显隐（弃用，为了兼容历史数据，这个字段永远不要使用）
 

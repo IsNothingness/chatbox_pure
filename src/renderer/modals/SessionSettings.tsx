@@ -6,11 +6,13 @@ import {
   FileButton,
   Flex,
   Input,
+  Select,
   Slider,
   Stack,
   Switch,
   Text,
   Textarea,
+  TextInput,
   Tooltip,
 } from '@mantine/core'
 import { chatSessionSettings, pictureSessionSettings } from '@shared/defaults'
@@ -25,6 +27,7 @@ import {
 import {
   getReasoningControlLevel,
   getReasoningControlOptions,
+  getReasoningCustomValue,
   getReasoningProviderOptions,
   type ReasoningControlLevel,
   type ReasoningControlOption,
@@ -38,7 +41,6 @@ import { AssistantAvatar } from '@/components/common/Avatar'
 import LazyNumberInput from '@/components/common/LazyNumberInput'
 import MaxContextMessageCountSlider from '@/components/common/MaxContextMessageCountSlider'
 import { ScalableIcon } from '@/components/common/ScalableIcon'
-import SegmentedControl from '@/components/common/SegmentedControl'
 import SliderWithInput from '@/components/common/SliderWithInput'
 import { handleImageInputAndSave, ImageInStorage } from '@/components/Image'
 import ImageStyleSelect from '@/components/ImageStyleSelect'
@@ -381,10 +383,18 @@ function getReasoningOptionLabel(option: ReasoningControlOption, t: (key: string
       return t('On')
     case 'low':
       return t('Low')
+    case 'minimal':
+      return t('Minimal')
     case 'medium':
       return t('Medium')
     case 'high':
       return t('High')
+    case 'xhigh':
+      return t('Extra high')
+    case 'max':
+      return t('Maximum')
+    case 'custom':
+      return t('Custom')
   }
 }
 
@@ -413,16 +423,47 @@ function ReasoningControlConfig({
     () => getReasoningControlLevel(provider, modelInfo, settings?.providerOptions),
     [provider, modelInfo, settings?.providerOptions]
   )
+  const savedCustomValue = useMemo(
+    () => getReasoningCustomValue(provider, modelInfo, settings?.providerOptions),
+    [provider, modelInfo, settings?.providerOptions]
+  )
+  const [customValue, setCustomValue] = useState(savedCustomValue)
+  const modelScope = `${provider || ''}:${modelId || ''}`
+  const [customDraft, setCustomDraft] = useState({ scope: modelScope, active: false })
+  const isCustomDraft = customDraft.scope === modelScope && customDraft.active
+
+  useEffect(() => {
+    setCustomValue(savedCustomValue)
+  }, [savedCustomValue])
 
   const handleChange = useCallback(
-    (value: string) => {
+    (value: string | null) => {
+      if (!value) return
+      const nextLevel = value as ReasoningControlLevel
+      if (nextLevel === 'custom') {
+        setCustomDraft({ scope: modelScope, active: true })
+        if (!customValue) return
+      } else {
+        setCustomDraft({ scope: modelScope, active: false })
+      }
       onSettingsChange({
         providerOptions: getReasoningProviderOptions(
           provider,
           modelInfo,
-          value as ReasoningControlLevel,
-          settings?.providerOptions
+          nextLevel,
+          settings?.providerOptions,
+          nextLevel === 'custom' ? customValue : undefined
         ),
+      })
+    },
+    [onSettingsChange, provider, modelInfo, settings?.providerOptions, customValue, modelScope]
+  )
+
+  const handleCustomValueChange = useCallback(
+    (value: string) => {
+      setCustomValue(value)
+      onSettingsChange({
+        providerOptions: getReasoningProviderOptions(provider, modelInfo, 'custom', settings?.providerOptions, value),
       })
     },
     [onSettingsChange, provider, modelInfo, settings?.providerOptions]
@@ -450,14 +491,26 @@ function ReasoningControlConfig({
         </Tooltip>
       </Flex>
 
-      <div style={{ minWidth: 0, overflowX: 'auto' }}>
-        <SegmentedControl
-          key={`reasoning-control:${options.map((o) => o.level).join(',')}`}
-          value={level}
-          onChange={handleChange}
-          data={options.map((o) => ({ label: getReasoningOptionLabel(o, t), value: o.level }))}
+      <Select
+        key={`reasoning-control:${options.map((o) => o.level).join(',')}`}
+        value={isCustomDraft ? 'custom' : level}
+        onChange={handleChange}
+        allowDeselect={false}
+        data={options.map((option) => ({
+          label: getReasoningOptionLabel(option, t),
+          value: option.level,
+        }))}
+      />
+
+      {isCustomDraft || level === 'custom' ? (
+        <TextInput
+          label={t('Custom thinking value')}
+          description={t('Enter the exact effort value or token budget required by your provider')}
+          placeholder={t('For example: max or 8192') || ''}
+          value={customValue}
+          onChange={(event) => handleCustomValueChange(event.currentTarget.value)}
         />
-      </div>
+      ) : null}
     </Stack>
   )
 }

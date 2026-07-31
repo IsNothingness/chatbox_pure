@@ -24,6 +24,7 @@ import { useTranslation } from 'react-i18next'
 import { AdaptiveSelect } from '@/components/AdaptiveSelect'
 import LazySlider from '@/components/common/LazySlider'
 import { languageNameMap, languages } from '@/i18n/locales'
+import { requestGenerationNotificationPermission } from '@/native/stream-http'
 import {
   type BackupExportItem,
   type BackupProgress,
@@ -40,6 +41,7 @@ import storage from '@/storage'
 import { getMetaStorage, recoverSessionList } from '@/stores/chatStore'
 import { migrateOnData } from '@/stores/migration'
 import { useSettingsStore } from '@/stores/settingsStore'
+import { CHATBOX_BUILD_PLATFORM } from '@/variables'
 
 export const Route = createFileRoute('/settings/general')({
   component: RouteComponent,
@@ -207,6 +209,46 @@ export function RouteComponent() {
           />
         </Stack>
       </Stack>
+
+      {CHATBOX_BUILD_PLATFORM === 'android' && (
+        <>
+          <Divider />
+
+          <Stack gap="md">
+            <Title order={5}>{t('Background generation')}</Title>
+            <Text size="xs" c="chatbox-tertiary">
+              {t('Keep an Android foreground service active while a reply is being generated.')}
+            </Text>
+            <Switch
+              label={t('Keep generating in the background')}
+              checked={settings.keepGeneratingInBackground}
+              onChange={(event) => {
+                const checked = event.currentTarget.checked
+                setSettings({ keepGeneratingInBackground: checked })
+                if (checked) {
+                  void requestGenerationNotificationPermission()
+                }
+              }}
+            />
+            <Switch
+              label={t('Notify me when generation completes')}
+              description={t('Only sends a notification when ChatBox Pure is not visible.')}
+              checked={settings.notifyWhenGenerationCompletes}
+              disabled={!settings.keepGeneratingInBackground}
+              onChange={(event) => {
+                const checked = event.currentTarget.checked
+                if (!checked) {
+                  setSettings({ notifyWhenGenerationCompletes: false })
+                  return
+                }
+                void requestGenerationNotificationPermission().then((granted) => {
+                  setSettings({ notifyWhenGenerationCompletes: granted })
+                })
+              }}
+            />
+          </Stack>
+        </>
+      )}
 
       <Divider />
 

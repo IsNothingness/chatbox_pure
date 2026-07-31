@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { isDeepSeekReasoningModel } from '../models/utils/deepseek'
-import { ModelProviderEnum, type ProviderModelInfo } from '../types'
+import { ModelProviderEnum, type ProviderModelInfo, ProviderOptionsSchema } from '../types'
 import {
   getLegacyOpenAICompatibleThinkingType,
   getOpenAIReasoningEffort,
   getReasoningControlCapabilities,
   getReasoningControlLevel,
   getReasoningControlOptions,
+  getReasoningCustomValue,
   getReasoningProviderOptions,
   isClaudeAdaptiveThinkingModel,
   isOpenAIReasoningEffortSupported,
@@ -90,12 +91,12 @@ describe('reasoning-control', () => {
 
   it('maps DeepSeek and Qwen toggle-style reasoning', () => {
     const deepseek = getReasoningProviderOptions(ModelProviderEnum.DeepSeek, model('deepseek-reasoner'), 'medium')
-    const deepseekV4 = getReasoningProviderOptions(ModelProviderEnum.DeepSeek, model('deepseek-v4-pro'), 'medium')
+    const deepseekV4 = getReasoningProviderOptions(ModelProviderEnum.DeepSeek, model('deepseek-v4-pro'), 'high')
     const deepseekV32 = getReasoningProviderOptions(ModelProviderEnum.DeepSeek, model('deepseek-v3.2-thinking'), 'high')
     const qwen = getReasoningProviderOptions(ModelProviderEnum.Qwen, model('qwen3.7-max'), 'high')
 
     expect(deepseek?.deepseek?.thinking).toEqual({ type: 'enabled' })
-    expect(deepseekV4?.deepseek?.thinking).toEqual({ type: 'enabled' })
+    expect(deepseekV4?.deepseek).toEqual({ thinking: { type: 'enabled' }, reasoningEffort: 'high' })
     expect(deepseekV32?.deepseek?.thinking).toEqual({ type: 'enabled' })
     expect(getReasoningControlLevel(ModelProviderEnum.DeepSeek, model('deepseek-v3.2-thinking'), deepseekV32)).toBe(
       'high'
@@ -115,7 +116,154 @@ describe('reasoning-control', () => {
       { level: 'low', label: 'low' },
       { level: 'medium', label: 'medium' },
       { level: 'high', label: 'high' },
+      { level: 'xhigh', label: 'xhigh' },
     ])
+  })
+
+  it('uses official model-specific effort matrices for major providers', () => {
+    expect(getReasoningControlOptions(ModelProviderEnum.OpenAIResponses, model('gpt-5.1')).map((o) => o.level)).toEqual(
+      ['default', 'off', 'low', 'medium', 'high']
+    )
+    expect(getReasoningControlOptions(ModelProviderEnum.OpenAIResponses, model('gpt-5.6')).map((o) => o.level)).toEqual(
+      ['default', 'off', 'low', 'medium', 'high', 'xhigh', 'max']
+    )
+    expect(getReasoningControlOptions(ModelProviderEnum.OpenAI, model('gpt-5.6')).map((o) => o.level)).toEqual([
+      'default',
+      'off',
+      'low',
+      'medium',
+      'high',
+      'xhigh',
+    ])
+    expect(getReasoningControlOptions(ModelProviderEnum.OpenAIResponses, model('gpt-5')).map((o) => o.level)).toEqual([
+      'default',
+      'minimal',
+      'low',
+      'medium',
+      'high',
+    ])
+    expect(
+      getReasoningControlOptions(ModelProviderEnum.Claude, model('claude-sonnet-4-6')).map((o) => o.level)
+    ).toEqual(['default', 'low', 'medium', 'high', 'max'])
+    expect(
+      getReasoningControlOptions(ModelProviderEnum.DeepSeek, model('deepseek-v4-flash')).map((o) => o.level)
+    ).toEqual(['default', 'off', 'low', 'high', 'max'])
+    expect(
+      getReasoningControlOptions(ModelProviderEnum.DeepSeek, model('deepseek-v4-pro')).map((o) => o.level)
+    ).toEqual(['default', 'off', 'high', 'max'])
+    expect(getReasoningControlOptions(ModelProviderEnum.XAI, model('grok-4.5')).map((o) => o.level)).toEqual([
+      'default',
+      'low',
+      'medium',
+      'high',
+    ])
+    expect(
+      getReasoningControlOptions(ModelProviderEnum.XAI, model('grok-4.20-multi-agent')).map((o) => o.level)
+    ).toEqual(['default', 'low', 'medium', 'high', 'xhigh'])
+  })
+
+  it('lets unknown OpenAI-compatible relays persist an exact custom effort value', () => {
+    const relayModel = model('relay-future-reasoner', 'openai')
+    const options = getReasoningProviderOptions('my-openai-proxy', relayModel, 'custom', undefined, 'ultra')
+
+    expect(getReasoningControlOptions('my-openai-proxy', relayModel)).toEqual([
+      { level: 'default', label: 'default' },
+      { level: 'custom', label: 'custom' },
+    ])
+    expect(options?.openai?.reasoningEffort).toBe('ultra')
+    expect(getReasoningControlLevel('my-openai-proxy', relayModel, options)).toBe('custom')
+    expect(getReasoningCustomValue('my-openai-proxy', relayModel, options)).toBe('ultra')
+
+    const relayWithoutApiStyle = model('relay-private-reasoner')
+    const implicitOptions = getReasoningProviderOptions(
+      'my-openai-proxy',
+      relayWithoutApiStyle,
+      'custom',
+      undefined,
+      'turbo'
+    )
+    expect(implicitOptions).toEqual({ openai: { reasoningEffort: 'turbo' } })
+    expect(getReasoningCustomValue('my-openai-proxy', relayWithoutApiStyle, implicitOptions)).toBe('turbo')
+
+    const identifiedModel = model('gpt-5.5', 'openai')
+    const nonStandardOptions = getReasoningProviderOptions(
+      'my-openai-proxy',
+      identifiedModel,
+      'custom',
+      undefined,
+      'max'
+    )
+    expect(getReasoningControlLevel('my-openai-proxy', identifiedModel, nonStandardOptions)).toBe('custom')
+    expect(getReasoningCustomValue('my-openai-proxy', identifiedModel, nonStandardOptions)).toBe('max')
+  })
+
+  it('uses OpenRouter reasoning metadata before local model-name heuristics', () => {
+    const modelInfo: ProviderModelInfo = {
+      modelId: 'vendor/future-model',
+      reasoning: {
+        supportedEfforts: ['max', 'high', 'low'],
+        defaultEffort: 'high',
+        defaultEnabled: true,
+        mandatory: true,
+      },
+    }
+
+    expect(getReasoningControlOptions(ModelProviderEnum.OpenRouter, modelInfo).map((o) => o.level)).toEqual([
+      'default',
+      'low',
+      'high',
+      'max',
+    ])
+    expect(getReasoningProviderOptions(ModelProviderEnum.OpenRouter, modelInfo, 'off')).toBeUndefined()
+  })
+
+  it('uses OpenRouter-advertised token-budget controls when available', () => {
+    const modelInfo: ProviderModelInfo = {
+      modelId: 'vendor/budget-reasoner',
+      reasoning: {
+        supportedEfforts: ['low', 'high'],
+        supportsMaxTokens: true,
+      },
+    }
+
+    expect(getReasoningControlOptions(ModelProviderEnum.OpenRouter, modelInfo).map((option) => option.level)).toEqual([
+      'default',
+      'off',
+      'low',
+      'high',
+      'custom',
+    ])
+    const options = getReasoningProviderOptions(ModelProviderEnum.OpenRouter, modelInfo, 'custom', undefined, '2345')
+    expect(options).toEqual({ openrouter: { reasoning: { max_tokens: 2345, exclude: false } } })
+    expect(getReasoningControlLevel(ModelProviderEnum.OpenRouter, modelInfo, options)).toBe('custom')
+    expect(getReasoningCustomValue(ModelProviderEnum.OpenRouter, modelInfo, options)).toBe('2345')
+  })
+
+  it('supports numeric custom thinking budgets without converting them to presets', () => {
+    const qwenModel = model('qwen3.7-max')
+    const options = getReasoningProviderOptions(ModelProviderEnum.Qwen, qwenModel, 'custom', undefined, '12345')
+
+    expect(options?.openaiCompatible).toEqual({ enable_thinking: true, thinking_budget: 12345 })
+    expect(getReasoningControlLevel(ModelProviderEnum.Qwen, qwenModel, options)).toBe('custom')
+    expect(getReasoningCustomValue(ModelProviderEnum.Qwen, qwenModel, options)).toBe('12345')
+  })
+
+  it('preserves current and relay-specific effort values through settings validation', () => {
+    expect(
+      ProviderOptionsSchema.parse({
+        openai: { reasoningEffort: 'max' },
+        claude: { effort: 'xhigh' },
+        deepseek: { thinking: { type: 'enabled' }, reasoningEffort: 'max' },
+        openaiCompatible: { thinking: { type: 'enabled' }, reasoningEffort: 'relay-ultra' },
+        openrouter: { reasoning: { effort: 'max' } },
+      })
+    ).toEqual({
+      openai: { reasoningEffort: 'max' },
+      claude: { effort: 'xhigh' },
+      deepseek: { thinking: { type: 'enabled' }, reasoningEffort: 'max' },
+      openaiCompatible: { thinking: { type: 'enabled' }, reasoningEffort: 'relay-ultra' },
+      openrouter: { reasoning: { effort: 'max' } },
+    })
   })
 
   it('omits the off option for models whose thinking cannot be force-disabled', () => {
@@ -125,6 +273,7 @@ describe('reasoning-control', () => {
       { level: 'low', label: 'low' },
       { level: 'medium', label: 'medium' },
       { level: 'high', label: 'high' },
+      { level: 'custom', label: 'custom' },
     ])
     // Claude effort/adaptive models are controlled via the effort param only; an explicit
     // thinking disable never reaches the wire, so no off option is offered.
@@ -139,9 +288,11 @@ describe('reasoning-control', () => {
       { level: 'low', label: 'low' },
       { level: 'medium', label: 'medium' },
       { level: 'high', label: 'high' },
+      { level: 'xhigh', label: 'xhigh' },
+      { level: 'max', label: 'max' },
     ])
-    // Budget-style Claude and Gemini Flash keep their explicit off.
-    expect(getReasoningControlOptions(ModelProviderEnum.Claude, model('claude-sonnet-4-6'))[1]).toEqual({
+    // Older budget-style Claude and Gemini Flash keep their explicit off.
+    expect(getReasoningControlOptions(ModelProviderEnum.Claude, model('claude-sonnet-4-5'))[1]).toEqual({
       level: 'off',
       label: 'off',
     })
@@ -149,6 +300,9 @@ describe('reasoning-control', () => {
       level: 'off',
       label: 'off',
     })
+    expect(
+      getReasoningControlOptions(ModelProviderEnum.Qwen, model('qwen3.8-max-preview')).map((option) => option.level)
+    ).not.toContain('off')
     // Registry id variants and proxied google apiStyle must also lose the off option.
     for (const id of ['gemini-2.5-pro-preview-06-05', 'models/gemini-2.5-pro']) {
       const levels = getReasoningControlOptions(ModelProviderEnum.Gemini, model(id)).map((o) => o.level)
@@ -187,11 +341,12 @@ describe('reasoning-control', () => {
       })
     ).toBe('off')
     expect(getReasoningControlLevel(ModelProviderEnum.XAI, model('grok-4.3'), undefined)).toBe('default')
+    // xAI reasoning models cannot be disabled; a stale `none` value is ignored by the UI.
     expect(
       getReasoningControlLevel(ModelProviderEnum.XAI, model('grok-4.3'), {
         openai: { reasoningEffort: 'none', forceReasoning: true },
       })
-    ).toBe('off')
+    ).toBe('default')
   })
 
   it('drops mismatched-generation Claude options at the request edge', () => {
@@ -207,14 +362,14 @@ describe('reasoning-control', () => {
         thinking: { type: 'enabled', budgetTokens: 1024 },
       })
     ).toEqual({ effort: 'low' })
-    expect(normalizeClaudeReasoningOptions('claude-sonnet-4-6', { effort: 'high' })).toBeUndefined()
+    expect(normalizeClaudeReasoningOptions('claude-sonnet-4-6', { effort: 'high' })).toEqual({ effort: 'high' })
     expect(
       normalizeClaudeReasoningOptions('claude-sonnet-4-6', { thinking: { type: 'disabled', budgetTokens: 0 } })
-    ).toEqual({ thinking: { type: 'disabled', budgetTokens: 0 } })
+    ).toBeUndefined()
     expect(normalizeClaudeReasoningOptions('claude-sonnet-4-6', undefined)).toBeUndefined()
     expect(usesClaudeEffortControl('claude-opus-4-5')).toBe(true)
     expect(usesClaudeEffortControl('claude-opus-4-8')).toBe(true)
-    expect(usesClaudeEffortControl('claude-sonnet-4-6')).toBe(false)
+    expect(usesClaudeEffortControl('claude-sonnet-4-6')).toBe(true)
   })
 
   it('offers effort controls for OpenAI o-series models without an off option', () => {
@@ -307,7 +462,7 @@ describe('reasoning-control', () => {
     expect(geminiLevel(24576)).toBe('high')
     // Claude thresholds (1024/4096/8192) already map the legacy presets correctly.
     const claudeLevel = (budget: number) =>
-      getReasoningControlLevel(ModelProviderEnum.Claude, model('claude-sonnet-4-6'), {
+      getReasoningControlLevel(ModelProviderEnum.Claude, model('claude-sonnet-4-5'), {
         claude: { thinking: { type: 'enabled', budgetTokens: budget } },
       })
     expect(claudeLevel(2048)).toBe('low')
@@ -345,7 +500,7 @@ describe('reasoning-control', () => {
       })
     ).toBeUndefined()
     expect(
-      getReasoningProviderOptions(ModelProviderEnum.Claude, model('claude-sonnet-4-6'), 'default', {
+      getReasoningProviderOptions(ModelProviderEnum.Claude, model('claude-sonnet-4-5'), 'default', {
         claude: { thinking: { type: 'enabled', budgetTokens: 4096 } },
       })
     ).toBeUndefined()
@@ -358,41 +513,35 @@ describe('reasoning-control', () => {
       })
     ).toBe('off')
     expect(
-      getReasoningControlLevel(ModelProviderEnum.Claude, model('claude-sonnet-4-6'), {
+      getReasoningControlLevel(ModelProviderEnum.Claude, model('claude-sonnet-4-5'), {
         claude: { thinking: { type: 'disabled', budgetTokens: 0 } },
       })
     ).toBe('off')
   })
 
   it('maps off to explicit disable or minimum reasoning parameters per provider', () => {
-    expect(getReasoningProviderOptions(ModelProviderEnum.Claude, model('claude-sonnet-4-6'), 'off')).toEqual({
+    expect(getReasoningProviderOptions(ModelProviderEnum.Claude, model('claude-sonnet-4-5'), 'off')).toEqual({
       claude: { thinking: { type: 'disabled', budgetTokens: 0 } },
     })
     expect(getReasoningProviderOptions(ModelProviderEnum.Claude, model('claude-opus-4-8'), 'off')).toBeUndefined()
     expect(getReasoningProviderOptions(ModelProviderEnum.OpenAIResponses, model('gpt-5.5'), 'off')).toEqual({
       openai: { reasoningEffort: 'none', forceReasoning: true },
     })
-    expect(getReasoningProviderOptions(ModelProviderEnum.OpenAIResponses, model('gpt-5'), 'off')).toEqual({
-      openai: { reasoningEffort: 'minimal', forceReasoning: true },
-    })
+    expect(getReasoningProviderOptions(ModelProviderEnum.OpenAIResponses, model('gpt-5'), 'off')).toBeUndefined()
     expect(getReasoningProviderOptions(ModelProviderEnum.Gemini, model('gemini-2.5-flash'), 'off')).toEqual({
       google: { thinkingConfig: { thinkingBudget: 0, includeThoughts: false } },
     })
-    expect(getReasoningProviderOptions(ModelProviderEnum.Gemini, model('gemini-3-pro-preview'), 'off')).toEqual({
-      google: { thinkingConfig: { thinkingLevel: 'low', includeThoughts: false } },
-    })
-    expect(getReasoningProviderOptions(ModelProviderEnum.Gemini, model('gemini-3-flash-preview'), 'off')).toEqual({
-      google: { thinkingConfig: { thinkingLevel: 'minimal', includeThoughts: false } },
-    })
+    expect(getReasoningProviderOptions(ModelProviderEnum.Gemini, model('gemini-3-pro-preview'), 'off')).toBeUndefined()
+    expect(
+      getReasoningProviderOptions(ModelProviderEnum.Gemini, model('gemini-3-flash-preview'), 'off')
+    ).toBeUndefined()
     expect(getReasoningProviderOptions(ModelProviderEnum.DeepSeek, model('deepseek-v4-pro'), 'off')).toEqual({
       deepseek: { thinking: { type: 'disabled' } },
     })
     expect(getReasoningProviderOptions(ModelProviderEnum.Qwen, model('qwen3.7-max'), 'off')).toEqual({
       openaiCompatible: { enable_thinking: false },
     })
-    expect(getReasoningProviderOptions(ModelProviderEnum.XAI, model('grok-4.3'), 'off')).toEqual({
-      openai: { reasoningEffort: 'none', forceReasoning: true },
-    })
+    expect(getReasoningProviderOptions(ModelProviderEnum.XAI, model('grok-4.3'), 'off')).toBeUndefined()
     expect(getReasoningProviderOptions(ModelProviderEnum.OpenRouter, model('deepseek/deepseek-v4-pro'), 'off')).toEqual(
       {
         openrouter: { reasoning: { enabled: false, exclude: true } },
@@ -416,12 +565,13 @@ describe('reasoning-control', () => {
     })
     expect(getReasoningControlCapabilities(ModelProviderEnum.DeepSeek, v4)).toEqual({
       supported: true,
-      kind: 'toggle',
+      kind: 'deepseek-effort',
     })
     expect(getReasoningControlOptions(ModelProviderEnum.DeepSeek, v4)).toEqual([
       { level: 'default', label: 'default' },
       { level: 'off', label: 'off' },
-      { level: 'high', label: 'on' },
+      { level: 'high', label: 'high' },
+      { level: 'max', label: 'max' },
     ])
     expect(options?.deepseek).toEqual({ thinking: { type: 'enabled' } })
   })
@@ -436,14 +586,15 @@ describe('reasoning-control', () => {
 
     expect(getReasoningControlCapabilities(ModelProviderEnum.ChatboxAI, modelInfo)).toEqual({
       supported: true,
-      kind: 'toggle',
+      kind: 'deepseek-effort',
     })
     expect(getReasoningControlOptions(ModelProviderEnum.ChatboxAI, modelInfo)).toEqual([
       { level: 'default', label: 'default' },
       { level: 'off', label: 'off' },
-      { level: 'high', label: 'on' },
+      { level: 'high', label: 'high' },
+      { level: 'max', label: 'max' },
     ])
-    expect(onOptions?.deepseek).toEqual({ thinking: { type: 'enabled' } })
+    expect(onOptions?.deepseek).toEqual({ thinking: { type: 'enabled' }, reasoningEffort: 'high' })
     expect(offOptions?.deepseek).toEqual({ thinking: { type: 'disabled' } })
     expect(getReasoningControlLevel(ModelProviderEnum.ChatboxAI, modelInfo, onOptions)).toBe('high')
   })
@@ -457,12 +608,12 @@ describe('reasoning-control', () => {
     expect(getReasoningControlCapabilities(ModelProviderEnum.DeepSeek, modelInfo).supported).toBe(false)
   })
 
-  it('maps xAI Grok 4.3 to OpenAI-compatible reasoning effort', () => {
+  it('maps xAI Grok reasoning effort without exposing an unsupported off state', () => {
     const offOptions = getReasoningProviderOptions(ModelProviderEnum.XAI, model('grok-4.3'), 'off')
     const lowOptions = getReasoningProviderOptions(ModelProviderEnum.XAI, model('grok-4.3'), 'low')
     const aliasOptions = getReasoningProviderOptions(ModelProviderEnum.XAI, model('grok-4-1-fast'), 'medium')
 
-    expect(offOptions?.openai).toEqual({ reasoningEffort: 'none', forceReasoning: true })
+    expect(offOptions).toBeUndefined()
     expect(lowOptions?.openai).toEqual({
       reasoningEffort: 'low',
       include: ['reasoning.encrypted_content'],
@@ -485,14 +636,13 @@ describe('reasoning-control', () => {
     const claudeEffort = getReasoningProviderOptions(ModelProviderEnum.Claude, model('claude-opus-4-5'), 'medium')
     const claudeAdaptive = getReasoningProviderOptions(ModelProviderEnum.Claude, model('claude-opus-4-8'), 'high')
     const gpt51Off = getReasoningProviderOptions(ModelProviderEnum.OpenAIResponses, model('gpt-5.1'), 'off')
-    const gpt5Off = getReasoningProviderOptions(ModelProviderEnum.OpenAIResponses, model('gpt-5'), 'off')
+    const gpt5Minimal = getReasoningProviderOptions(ModelProviderEnum.OpenAIResponses, model('gpt-5'), 'minimal')
 
     expect(claudeEffort?.claude).toEqual({ effort: 'medium' })
     expect(claudeAdaptive?.claude).toEqual({ effort: 'high' })
     expect(gpt51Off?.openai?.reasoningEffort).toBe('none')
     expect(gpt51Off?.openai?.forceReasoning).toBe(true)
-    expect(gpt5Off?.openai?.reasoningEffort).toBe('minimal')
-    expect(gpt5Off?.openai?.forceReasoning).toBe(true)
+    expect(gpt5Minimal?.openai?.reasoningEffort).toBe('minimal')
   })
 
   it('uses ChatboxAI apiStyle to select the backend mapping', () => {
@@ -554,8 +704,13 @@ describe('reasoning-control', () => {
     expect(customAnthropicClaude.supported).toBe(true)
     expect(customOpenAIDeepSeek.supported).toBe(true)
     expect(customOpenAIDeepSeek.kind).toBe('toggle')
-    // A non-reasoning model on a custom provider stays unsupported (no stale params sent).
-    expect(customOpenAIPlainChat.supported).toBe(false)
+    // Unknown relay models expose only default/custom, so users can enter a
+    // provider-specific value without the app guessing a model family.
+    expect(customOpenAIPlainChat).toEqual({ supported: true, kind: 'custom-effort' })
+    expect(getReasoningControlOptions('my-openai-proxy', model('some-chat-model', 'openai'))).toEqual([
+      { level: 'default', label: 'default' },
+      { level: 'custom', label: 'custom' },
+    ])
     // Claude model id behind an OpenAI-style custom endpoint is flagged, like ChatboxAI.
     expect(customAnthropicMismatch.supported).toBe(false)
     expect(customAnthropicMismatch.disabledReason).toBe('requires-anthropic-api-style')
@@ -591,7 +746,7 @@ describe('reasoning-control', () => {
   })
 
   it('reads the selected level only from the current model api style', () => {
-    const claudeBudgetModel = model('claude-sonnet-4-6')
+    const claudeBudgetModel = model('claude-sonnet-4-5')
     const claudeAdaptiveModel = model('claude-opus-4-8')
     const gptModel = model('gpt-5.5')
 

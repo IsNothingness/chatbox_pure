@@ -27,6 +27,7 @@ import './setup/load_polyfill'
 // 引入保护代码
 import './setup/protect'
 import { QueryClientProvider } from '@tanstack/react-query'
+import { switchTheme } from './hooks/useAppTheme'
 import { initSessionAttachmentRagMaintenance } from './setup/session_attachment_rag_maintenance'
 import { initLastUsedModelStore } from './stores/lastUsedModelStore'
 import { initLoginLicenseStateReconciliation } from './stores/premiumActions'
@@ -103,7 +104,7 @@ function InitPage() {
 }
 
 // initializeApp执行时间少于1s的话，将不会看到log
-const tid = setTimeout(() => {
+const tid = setTimeout(async () => {
   ReactDOM.createRoot(document.getElementById('log-root') as HTMLElement).render(
     <StrictMode>
       <ErrorBoundary>
@@ -112,7 +113,10 @@ const tid = setTimeout(() => {
     </StrictMode>
   )
   if (platform.type === 'mobile') {
-    SplashScreen.hide()
+    const initialTheme = localStorage.getItem('initial-theme') === 'dark' ? 'dark' : 'light'
+    await platform.setStatusBarStyle?.({ darkIcons: initialTheme === 'light' })
+    await SplashScreen.hide()
+    await platform.setStatusBarStyle?.({ darkIcons: initialTheme === 'light' })
   }
 }, 1000)
 
@@ -129,6 +133,7 @@ initializeApp()
     const [settings] = await Promise.all([initSettingsStore(), initLastUsedModelStore(), initRecentDirectoriesStore()])
 
     i18n.changeLanguage(settings.language)
+    const resolvedTheme = await switchTheme(settings.theme)
     initLoginLicenseStateReconciliation()
 
     // Check the Pure repository metadata for full-package updates on every platform.
@@ -150,7 +155,10 @@ initializeApp()
     )
 
     if (platform.type === 'mobile') {
-      SplashScreen.hide()
+      await SplashScreen.hide()
+      // The Android splash theme may write system-bar appearance while it exits.
+      // Commit the resolved app theme once more after that transition.
+      await platform.setStatusBarStyle?.({ darkIcons: resolvedTheme === 'light' })
     }
     const el = document.querySelector('.splash-screen')
     if (el) {

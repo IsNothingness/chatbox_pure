@@ -4,4 +4,8 @@
     <string name="title_activity_main">ChatBox Pure</string>
     <string name="package_name">io.github.isnothingness.chatboxpure</string>
     <string name="custom_url_scheme">io.github.isnothingness.chatboxpure</string>
+    <string name="background_generation_channel">Background generation</string>
+    <string name="background_generation_channel_description">Keeps replies generating while the app is in the background</string>
+    <string name="generation_complete_channel">Completed replies</string>
+    <string name="generation_complete_channel_description">Notifies you when a reply has finished generating</string>
 </resources>

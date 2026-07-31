@@ -91,6 +91,8 @@ export function settings(): Settings {
     language: 'en',
     fontSize: 14,
     spellCheck: true,
+    keepGeneratingInBackground: true,
+    notifyWhenGenerationCompletes: false,
 
     defaultPrompt: getDefaultPrompt(),
 

@@ -24,9 +24,13 @@ interface ReasoningControlButtonProps {
 const LEVEL_COLORS: Record<ReasoningControlLevel, string> = {
   default: 'var(--chatbox-tint-tertiary)',
   off: 'var(--chatbox-tint-tertiary)',
+  minimal: 'var(--chatbox-tint-secondary)',
   low: 'var(--chatbox-tint-secondary)',
   medium: 'var(--chatbox-tint-brand)',
   high: 'var(--chatbox-tint-brand)',
+  xhigh: 'var(--chatbox-tint-brand)',
+  max: 'var(--chatbox-tint-brand)',
+  custom: 'var(--chatbox-tint-brand)',
 }
 
 export default function ReasoningControlButton({
@@ -43,7 +47,10 @@ export default function ReasoningControlButton({
     () => getReasoningControlLevel(provider, model, providerOptions),
     [provider, model, providerOptions]
   )
-  const options = useMemo(() => getReasoningControlOptions(provider, model), [provider, model])
+  const options = useMemo(
+    () => getReasoningControlOptions(provider, model).filter((option) => option.level !== 'custom'),
+    [provider, model]
+  )
 
   if (!capabilities.supported && !capabilities.disabledReason) {
     return null
@@ -118,12 +125,15 @@ export default function ReasoningControlButton({
   )
 }
 
-type ReasoningEffortLevel = Exclude<ReasoningControlLevel, 'default' | 'off'>
+type ReasoningEffortLevel = Exclude<ReasoningControlLevel, 'default' | 'off' | 'custom'>
 
 const REASONING_LEVEL_DOT_COUNTS: Record<ReasoningEffortLevel, number> = {
+  minimal: 1,
   low: 1,
   medium: 2,
   high: 3,
+  xhigh: 3,
+  max: 3,
 }
 
 function CompactReasoningLevelIcon({ level, size }: { level: ReasoningControlLevel; size: number }) {
@@ -150,8 +160,8 @@ function ReasoningLevelStatusIcon({
   size: number
   className?: string
 }) {
-  if (level === 'default' || level === 'off') {
-    const StatusIcon = level === 'default' ? IconSparkles : IconCircleOff
+  if (level === 'default' || level === 'off' || level === 'custom') {
+    const StatusIcon = level === 'off' ? IconCircleOff : IconSparkles
     return (
       <StatusIcon
         aria-hidden
@@ -221,11 +231,19 @@ function getLevelLabel(level: ReasoningControlLevel, t: (key: string) => string)
       return t('Default')
     case 'off':
       return t('Off')
+    case 'minimal':
+      return t('Minimal')
     case 'low':
       return t('Low')
     case 'medium':
       return t('Medium')
     case 'high':
       return t('High')
+    case 'xhigh':
+      return t('Extra high')
+    case 'max':
+      return t('Maximum')
+    case 'custom':
+      return t('Custom')
   }
 }

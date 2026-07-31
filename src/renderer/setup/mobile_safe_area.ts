@@ -12,6 +12,13 @@ interface RoundedCorners {
 
 interface ScreenGeometryPlugin {
   getRoundedCorners(): Promise<RoundedCorners>
+  getSystemGestureInsets(): Promise<{
+    left: number
+    top: number
+    right: number
+    bottom: number
+    edgeNavigation: boolean
+  }>
 }
 
 const ScreenGeometry = registerPlugin<ScreenGeometryPlugin>('ScreenGeometry')
@@ -44,14 +51,33 @@ async function refreshRoundedCorners() {
   }
 }
 
+async function refreshSystemGestureInsets() {
+  if (Capacitor.getPlatform() !== 'android') {
+    document.documentElement.dataset.systemGestureNavigation = 'false'
+    return
+  }
+  try {
+    const insets = await ScreenGeometry.getSystemGestureInsets()
+    document.documentElement.dataset.systemGestureNavigation = String(insets.edgeNavigation)
+    for (const edge of ['left', 'top', 'right', 'bottom'] as const) {
+      document.documentElement.style.setProperty(`--mobile-system-gesture-inset-${edge}`, `${insets[edge]}px`)
+    }
+  } catch (error) {
+    document.documentElement.dataset.systemGestureNavigation = 'false'
+    console.warn('Failed to read Android system gesture insets:', error)
+  }
+}
+
 void SafeArea.getSafeAreaInsets().then(({ insets }) => {
   setSafeAreaInsets(insets)
 })
 void refreshRoundedCorners()
+void refreshSystemGestureInsets()
 
 void SafeArea.addListener('safeAreaChanged', ({ insets }) => {
   setSafeAreaInsets(insets)
   void refreshRoundedCorners()
+  void refreshSystemGestureInsets()
 })
 
 void Keyboard.addListener('keyboardWillShow', () => {
@@ -66,4 +92,5 @@ void Keyboard.addListener('keyboardWillHide', () => {
 
 window.addEventListener('resize', () => {
   void refreshRoundedCorners()
+  void refreshSystemGestureInsets()
 })

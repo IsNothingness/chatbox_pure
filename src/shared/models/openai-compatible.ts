@@ -126,6 +126,13 @@ interface ListModelsResponse {
     hugging_face_id?: string
     per_request_limits?: Record<string, unknown>
     supported_parameters?: string[]
+    reasoning?: {
+      supported_efforts?: string[] | null
+      default_effort?: string
+      default_enabled?: boolean
+      supports_max_tokens?: boolean
+      mandatory?: boolean
+    }
   }[]
 }
 
@@ -172,6 +179,16 @@ export async function fetchRemoteModels(
     // Add context window if available
     if (item.context_length) {
       modelInfo.contextWindow = item.context_length
+    }
+
+    if (item.reasoning) {
+      modelInfo.reasoning = {
+        supportedEfforts: item.reasoning.supported_efforts,
+        defaultEffort: item.reasoning.default_effort,
+        defaultEnabled: item.reasoning.default_enabled,
+        supportsMaxTokens: item.reasoning.supports_max_tokens,
+        mandatory: item.reasoning.mandatory,
+      }
     }
 
     // Add capabilities based on architecture

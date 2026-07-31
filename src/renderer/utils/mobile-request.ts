@@ -1,5 +1,7 @@
 import { CapacitorHttp } from '@capacitor/core'
+import i18n from '@/i18n'
 import { createNativeReadableStream } from '@/native/stream-http'
+import { settingsStore } from '@/stores/settingsStore'
 import { ApiError } from '../../shared/models/errors'
 
 function isLockedStreamCancelError(error: unknown): boolean {
@@ -47,12 +49,20 @@ export async function handleMobileRequest(
         Accept: 'text/event-stream',
       }
 
-      const stream = createNativeReadableStream({
-        url,
-        method,
-        headers: streamHeaders,
-        body: body as string,
-      })
+      const settings = settingsStore.getState().getSettings()
+      const stream = createNativeReadableStream(
+        {
+          url,
+          method,
+          headers: streamHeaders,
+          body: body as string,
+        },
+        {
+          keepAlive: settings.keepGeneratingInBackground,
+          notificationTitle: i18n.t('ChatBox Pure is generating a reply'),
+          notificationBody: i18n.t('You can leave the app or turn off the screen.'),
+        }
+      )
 
       // Handle abort signal for stream cancellation
       if (signal) {

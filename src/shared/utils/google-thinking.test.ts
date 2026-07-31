@@ -22,26 +22,26 @@ describe('google-thinking utils', () => {
   })
 
   it('returns the documented thinking levels for supported Gemini 3 models', () => {
-    // Pro models: low/medium/high (no minimal)
-    expect(getSupportedGoogleThinkingLevels('gemini-3-pro-preview')).toEqual(['low', 'medium', 'high'])
+    // The original Gemini 3 Pro preview only accepts low/high; 3.1 Pro adds medium.
+    expect(getSupportedGoogleThinkingLevels('gemini-3-pro-preview')).toEqual(['low', 'high'])
     expect(getSupportedGoogleThinkingLevels('gemini-3.1-pro-preview')).toEqual(['low', 'medium', 'high'])
     // Flash models: minimal/low/medium/high
     expect(getSupportedGoogleThinkingLevels('gemini-3-flash-preview')).toEqual(['minimal', 'low', 'medium', 'high'])
     expect(getSupportedGoogleThinkingLevels('gemini-3.5-flash')).toEqual(['minimal', 'low', 'medium', 'high'])
-    expect(getSupportedGoogleThinkingLevels('gemini-3.1-flash-lite-preview')).toEqual([
-      'minimal',
-      'low',
-      'medium',
-      'high',
-    ])
+    expect(getSupportedGoogleThinkingLevels('gemini-3.1-flash-lite-preview')).toEqual([])
+    expect(getSupportedGoogleThinkingLevels('gemini-3.1-flash-lite-image-preview')).toEqual(['minimal', 'high'])
     // Image models: not in the supported list
     expect(getSupportedGoogleThinkingLevels('gemini-3.1-flash-image-preview')).toEqual([])
     expect(getSupportedGoogleThinkingLevels('gemini-3-pro-image-preview')).toEqual([])
   })
 
-  it('uses the highest supported level as the default Gemini 3 thinking level', () => {
+  it('uses the documented default Gemini thinking level for each model family', () => {
     expect(getDefaultGoogleThinkingLevel('gemini-3-pro-preview')).toBe('high')
     expect(getDefaultGoogleThinkingLevel('gemini-3-flash-preview')).toBe('high')
+    expect(getDefaultGoogleThinkingLevel('gemini-3.6-flash')).toBe('medium')
+    expect(getDefaultGoogleThinkingLevel('gemini-3.5-flash')).toBe('medium')
+    expect(getDefaultGoogleThinkingLevel('gemini-3.5-flash-lite')).toBe('minimal')
+    expect(getDefaultGoogleThinkingLevel('gemini-3.1-flash-lite-image-preview')).toBe('minimal')
     expect(getDefaultGoogleThinkingLevel('gemini-3.1-flash-image-preview')).toBeUndefined()
   })
 
@@ -95,15 +95,15 @@ describe('google-thinking utils', () => {
   })
 
   it('fills in default level when no thinkingLevel is set', () => {
-    const config = normalizeGoogleThinkingConfig('gemini-3-flash-preview', {
+    const config = normalizeGoogleThinkingConfig('gemini-3.6-flash', {
       includeThoughts: true,
     })
-    expect(config).toEqual({ thinkingLevel: 'high', includeThoughts: true })
+    expect(config).toEqual({ thinkingLevel: 'medium', includeThoughts: true })
   })
 
-  it('fills in default level when thinkingConfig is undefined for level-mode models', () => {
+  it('keeps the provider default implicit when thinkingConfig is undefined', () => {
     const config = normalizeGoogleThinkingConfig('gemini-3-flash-preview', undefined)
-    expect(config).toEqual({ thinkingLevel: 'high' })
+    expect(config).toBeUndefined()
   })
 
   it('returns undefined when thinkingConfig is undefined for non-level models', () => {
