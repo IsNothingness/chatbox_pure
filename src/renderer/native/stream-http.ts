@@ -1,3 +1,4 @@
+import { App } from '@capacitor/app'
 import { type PluginListenerHandle, registerPlugin } from '@capacitor/core'
 import { type StartStreamOptions, StreamHttp } from 'capacitor-stream-http'
 import { CHATBOX_BUILD_PLATFORM } from '@/variables'
@@ -25,6 +26,7 @@ interface NativeStreamChunk {
 
 interface NativeStreamSnapshot extends NativeStreamTask {
   chunks: NativeStreamChunk[]
+  hasMore: boolean
 }
 
 interface PureStartStreamOptions extends StartStreamOptions {
@@ -50,7 +52,12 @@ interface PureStreamEvent {
 
 interface PureStreamHttpPlugin {
   startStream(options: PureStartStreamOptions): Promise<{ id: string }>
-  attachStream(options: { id: string; afterSequence: number }): Promise<NativeStreamSnapshot>
+  attachStream(options: {
+    id: string
+    afterSequence: number
+    maxChunks?: number
+    maxBytes?: number
+  }): Promise<NativeStreamSnapshot>
   listStreams(): Promise<{ streams: NativeStreamTask[] }>
   acknowledgeStream(options: { id: string }): Promise<void>
   cancelStream(options: { id: string }): Promise<void>
@@ -64,10 +71,6 @@ interface PureStreamHttpPlugin {
 
 const PureStreamHttp = registerPlugin<PureStreamHttpPlugin>('PureStreamHttp')
 const CompatibleStreamHttp = StreamHttp as unknown as PureStreamHttpPlugin
-
-function getNativeStreamPlugin(): PureStreamHttpPlugin {
-  return CHATBOX_BUILD_PLATFORM === 'android' ? PureStreamHttp : CompatibleStreamHttp
-}
 
 function createStreamId(): string {
   if (typeof globalThis.crypto?.randomUUID === 'function') {
@@ -127,48 +130,58 @@ export async function cancelNativeStream(id: string): Promise<void> {
   }
 }
 
-export function createNativeReadableStream(
+interface BackgroundStreamOptions {
+  keepAlive: boolean
+  notificationTitle: string
+  notificationBody: string
+  notifyWhenComplete?: boolean
+  completionTitle?: string
+  completionBody?: string
+  clientRequestId?: string
+  sessionId?: string
+  messageId?: string
+  resumeStreamId?: string
+  onStreamAttached?: (id: string) => void
+}
+
+const ACTIVE_PULL_INTERVAL_MS = 50
+const IDLE_PULL_INTERVAL_MS = 120
+
+function createPureAndroidReadableStream(
   options: StartStreamOptions,
-  background?: {
-    keepAlive: boolean
-    notificationTitle: string
-    notificationBody: string
-    notifyWhenComplete?: boolean
-    completionTitle?: string
-    completionBody?: string
-    clientRequestId?: string
-    sessionId?: string
-    messageId?: string
-    resumeStreamId?: string
-    onStreamAttached?: (id: string) => void
-  }
+  background?: BackgroundStreamOptions
 ): ReadableStream<Uint8Array> {
-  const isPureAndroidStream = CHATBOX_BUILD_PLATFORM === 'android'
-  let streamId: string | null = isPureAndroidStream ? background?.resumeStreamId || createStreamId() : null
-  let removeChunk: (() => void) | null = null
-  let removeEnd: (() => void) | null = null
-  let removeError: (() => void) | null = null
+  let streamId = background?.resumeStreamId || createStreamId()
+  let removeAppState: (() => void) | null = null
+  let pullTimer: ReturnType<typeof setTimeout> | null = null
+  let pullInFlight = false
+  let pullRequested = false
+  let taskReady = false
+  let streamSettled = false
+  let appActive = true
+  let documentVisible = document.visibilityState !== 'hidden'
   const textEncoder = new TextEncoder()
   const pendingChunks = new Map<number, string>()
   let expectedSequence = 0
-  let terminal: { type: 'end' | 'error'; lastSequence: number; error?: string } | null = null
+  let activeController: ReadableStreamDefaultController<Uint8Array> | null = null
 
   const cleanup = () => {
-    removeChunk?.()
-    removeEnd?.()
-    removeError?.()
-    removeChunk = null
-    removeEnd = null
-    removeError = null
+    if (pullTimer) {
+      clearTimeout(pullTimer)
+      pullTimer = null
+    }
+    removeAppState?.()
+    removeAppState = null
+    document.removeEventListener('visibilitychange', handleVisibilityChange)
   }
 
-  const finishIfReady = (controller: ReadableStreamDefaultController<Uint8Array>) => {
-    if (!terminal || expectedSequence <= terminal.lastSequence) return
-    const result = terminal
-    terminal = null
+  const settle = (controller: ReadableStreamDefaultController<Uint8Array>, type: 'end' | 'error', error?: string) => {
+    if (streamSettled) return
+    streamSettled = true
+    activeController = null
     cleanup()
-    if (result.type === 'error') {
-      controller.error(new Error(result.error || 'Native stream error'))
+    if (type === 'error') {
+      controller.error(new Error(error || 'Native stream error'))
     } else {
       controller.close()
     }
@@ -183,97 +196,197 @@ export function createNativeReadableStream(
         controller.enqueue(textEncoder.encode(text))
       }
     }
-    finishIfReady(controller)
   }
 
-  const acceptChunk = (
-    controller: ReadableStreamDefaultController<Uint8Array>,
-    sequence: number | undefined,
-    chunk: string
-  ) => {
-    if (!isPureAndroidStream || sequence === undefined) {
-      if (chunk) controller.enqueue(textEncoder.encode(chunk))
-      return
-    }
+  const acceptChunk = (controller: ReadableStreamDefaultController<Uint8Array>, sequence: number, chunk: string) => {
     if (sequence < expectedSequence || pendingChunks.has(sequence)) return
     pendingChunks.set(sequence, chunk)
     flush(controller)
   }
 
-  const acceptTerminal = (
-    controller: ReadableStreamDefaultController<Uint8Array>,
-    type: 'end' | 'error',
-    lastSequence: number | undefined,
-    error?: string
-  ) => {
-    if (!isPureAndroidStream || lastSequence === undefined) {
-      cleanup()
-      if (type === 'error') controller.error(new Error(error || 'Native stream error'))
-      else controller.close()
+  const schedulePull = (delay: number) => {
+    if (!appActive || !documentVisible || !taskReady || streamSettled || !activeController || pullTimer) return
+    if (pullInFlight) {
+      pullRequested = true
       return
     }
-    terminal = { type, lastSequence, error }
-    finishIfReady(controller)
+    pullTimer = setTimeout(() => {
+      pullTimer = null
+      void pullSnapshot()
+    }, delay)
+  }
+
+  const pullSnapshot = async () => {
+    const controller = activeController
+    if (!appActive || !documentVisible || !taskReady || streamSettled || !controller) return
+    if (pullInFlight) {
+      pullRequested = true
+      return
+    }
+
+    pullInFlight = true
+    pullRequested = false
+    let receivedChunks = false
+    let hasMoreBacklog = false
+    try {
+      const snapshot = await PureStreamHttp.attachStream({
+        id: streamId,
+        afterSequence: expectedSequence - 1,
+        maxChunks: 128,
+        maxBytes: 256 * 1024,
+      })
+      if (!appActive || !documentVisible || streamSettled || activeController !== controller) return
+
+      receivedChunks = snapshot.chunks.length > 0
+      hasMoreBacklog = snapshot.hasMore
+      for (const record of snapshot.chunks) {
+        acceptChunk(controller, record.sequence, record.chunk)
+      }
+
+      const hasAllTerminalChunks = expectedSequence > snapshot.lastSequence
+      if (snapshot.state === 'ended' && hasAllTerminalChunks) {
+        settle(controller, 'end')
+        return
+      }
+      if (snapshot.state === 'error' && hasAllTerminalChunks) {
+        settle(controller, 'error', snapshot.error)
+        return
+      }
+    } catch (error) {
+      if (streamSettled) return
+      const message = error instanceof Error ? error.message : String(error)
+      if (message.includes('Stream not found')) {
+        settle(controller, 'error', message)
+        return
+      }
+      console.warn(`Failed to read native stream ${streamId}:`, error)
+    } finally {
+      pullInFlight = false
+      schedulePull(
+        pullRequested || hasMoreBacklog ? 0 : receivedChunks ? ACTIVE_PULL_INTERVAL_MS : IDLE_PULL_INTERVAL_MS
+      )
+    }
+  }
+
+  const handleVisibilityChange = () => {
+    documentVisible = document.visibilityState === 'visible'
+    if (!documentVisible) {
+      if (pullTimer) {
+        clearTimeout(pullTimer)
+        pullTimer = null
+      }
+      return
+    }
+    schedulePull(0)
   }
 
   return new ReadableStream<Uint8Array>({
     start: async (controller) => {
       try {
-        const nativeStream = getNativeStreamPlugin()
-        removeChunk = (
-          await nativeStream.addListener('chunk', (data) => {
-            if (!streamId || data.id !== streamId) return
-            acceptChunk(controller, data.sequence, data.chunk || '')
+        activeController = controller
+        document.addEventListener('visibilitychange', handleVisibilityChange)
+        removeAppState = (
+          await App.addListener('appStateChange', ({ isActive }) => {
+            appActive = isActive
+            if (!isActive) {
+              if (pullTimer) {
+                clearTimeout(pullTimer)
+                pullTimer = null
+              }
+              return
+            }
+            schedulePull(0)
           })
         ).remove
-
-        removeEnd = (
-          await nativeStream.addListener('end', (data) => {
-            if (!streamId || data.id !== streamId) return
-            acceptTerminal(controller, 'end', data.lastSequence)
-          })
-        ).remove
-
-        removeError = (
-          await nativeStream.addListener('error', (data) => {
-            if (!streamId || data.id !== streamId) return
-            acceptTerminal(controller, 'error', data.lastSequence, data.error)
-          })
-        ).remove
-
-        if (isPureAndroidStream && background?.resumeStreamId) {
-          const snapshot = await nativeStream.attachStream({
-            id: background.resumeStreamId,
-            afterSequence: -1,
-          })
-          streamId = snapshot.id
-          background.onStreamAttached?.(snapshot.id)
-          for (const record of snapshot.chunks) {
-            acceptChunk(controller, record.sequence, record.chunk)
-          }
-          if (snapshot.state === 'ended') {
-            acceptTerminal(controller, 'end', snapshot.lastSequence)
-          } else if (snapshot.state === 'error') {
-            acceptTerminal(controller, 'error', snapshot.lastSequence, snapshot.error)
-          }
-          return
+        documentVisible = document.visibilityState === 'visible'
+        try {
+          appActive = (await App.getState()).isActive
+        } catch {
+          appActive = true
         }
 
-        const res = await nativeStream.startStream({
-          ...options,
-          id: isPureAndroidStream ? streamId || undefined : undefined,
-          keepAlive: background?.keepAlive,
-          notificationTitle: background?.notificationTitle,
-          notificationBody: background?.notificationBody,
-          notifyWhenComplete: background?.notifyWhenComplete,
-          completionTitle: background?.completionTitle,
-          completionBody: background?.completionBody,
-          clientRequestId: background?.clientRequestId,
-          sessionId: background?.sessionId,
-          messageId: background?.messageId,
-        })
-        streamId = res.id
-        background?.onStreamAttached?.(res.id)
+        if (!background?.resumeStreamId) {
+          const result = await PureStreamHttp.startStream({
+            ...options,
+            id: streamId,
+            keepAlive: background?.keepAlive,
+            notificationTitle: background?.notificationTitle,
+            notificationBody: background?.notificationBody,
+            notifyWhenComplete: background?.notifyWhenComplete,
+            completionTitle: background?.completionTitle,
+            completionBody: background?.completionBody,
+            clientRequestId: background?.clientRequestId,
+            sessionId: background?.sessionId,
+            messageId: background?.messageId,
+          })
+          streamId = result.id
+        }
+        taskReady = true
+        background?.onStreamAttached?.(streamId)
+        schedulePull(0)
+      } catch (error) {
+        settle(controller, 'error', error instanceof Error ? error.message : 'Failed to start native stream')
+      }
+    },
+    pull: () => {
+      schedulePull(0)
+    },
+    cancel: async () => {
+      try {
+        await PureStreamHttp.cancelStream({ id: streamId })
+      } finally {
+        streamSettled = true
+        activeController = null
+        cleanup()
+      }
+    },
+  })
+}
+
+function createCompatibleEventReadableStream(options: StartStreamOptions): ReadableStream<Uint8Array> {
+  let streamId: string | null = null
+  let removeChunk: (() => void) | null = null
+  let removeEnd: (() => void) | null = null
+  let removeError: (() => void) | null = null
+  const textEncoder = new TextEncoder()
+
+  const cleanup = () => {
+    removeChunk?.()
+    removeEnd?.()
+    removeError?.()
+    removeChunk = null
+    removeEnd = null
+    removeError = null
+  }
+
+  return new ReadableStream<Uint8Array>({
+    start: async (controller) => {
+      try {
+        removeChunk = (
+          await CompatibleStreamHttp.addListener('chunk', (data) => {
+            if (streamId && data.id === streamId && data.chunk) {
+              controller.enqueue(textEncoder.encode(data.chunk))
+            }
+          })
+        ).remove
+        removeEnd = (
+          await CompatibleStreamHttp.addListener('end', (data) => {
+            if (streamId && data.id === streamId) {
+              cleanup()
+              controller.close()
+            }
+          })
+        ).remove
+        removeError = (
+          await CompatibleStreamHttp.addListener('error', (data) => {
+            if (streamId && data.id === streamId) {
+              cleanup()
+              controller.error(new Error(data.error || 'Native stream error'))
+            }
+          })
+        ).remove
+
+        streamId = (await CompatibleStreamHttp.startStream(options)).id
       } catch (error) {
         cleanup()
         controller.error(error instanceof Error ? error : new Error('Failed to start native stream'))
@@ -282,11 +395,20 @@ export function createNativeReadableStream(
     cancel: async () => {
       try {
         if (streamId) {
-          await getNativeStreamPlugin().cancelStream({ id: streamId })
+          await CompatibleStreamHttp.cancelStream({ id: streamId })
         }
       } finally {
         cleanup()
       }
     },
   })
+}
+
+export function createNativeReadableStream(
+  options: StartStreamOptions,
+  background?: BackgroundStreamOptions
+): ReadableStream<Uint8Array> {
+  return CHATBOX_BUILD_PLATFORM === 'android'
+    ? createPureAndroidReadableStream(options, background)
+    : createCompatibleEventReadableStream(options)
 }

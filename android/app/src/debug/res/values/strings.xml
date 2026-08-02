@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ChatBox Pure Debug</string>
+    <string name="title_activity_main">ChatBox Pure Debug</string>
+    <string name="package_name">io.github.isnothingness.chatboxpure.debug</string>
+    <string name="custom_url_scheme">io.github.isnothingness.chatboxpure.debug</string>
+</resources>

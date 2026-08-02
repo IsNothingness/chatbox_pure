@@ -1,7 +1,11 @@
 import { CapacitorHttp } from '@capacitor/core'
 import i18n from '@/i18n'
 import { consumeNativeGenerationContext, recordAttachedNativeStream } from '@/native/background-generation-context'
-import { createNativeReadableStream } from '@/native/stream-http'
+import {
+  cancelNativeStream,
+  createNativeReadableStream,
+  requestGenerationNotificationPermission,
+} from '@/native/stream-http'
 import { settingsStore } from '@/stores/settingsStore'
 import { ApiError } from '../../shared/models/errors'
 
@@ -52,6 +56,13 @@ export async function handleMobileRequest(
 
       const settings = settingsStore.getState().getSettings()
       const generationContext = consumeNativeGenerationContext(signal)
+      let attachedNativeStreamId: string | undefined
+      if (settings.keepGeneratingInBackground && !generationContext?.resumeStreamId) {
+        // This request is initiated by an explicit send action, which is the most
+        // relevant moment to ask Android 13+ for foreground/completion notifications.
+        // A denied permission does not prevent the foreground service from running.
+        await requestGenerationNotificationPermission()
+      }
       const stream = createNativeReadableStream(
         {
           url,
@@ -73,7 +84,11 @@ export async function handleMobileRequest(
           messageId: generationContext?.messageId,
           resumeStreamId: generationContext?.resumeStreamId,
           onStreamAttached: (streamId) => {
+            attachedNativeStreamId = streamId
             recordAttachedNativeStream(signal, streamId)
+            if (signal?.aborted) {
+              void cancelNativeStream(streamId)
+            }
           },
         }
       )
@@ -81,6 +96,12 @@ export async function handleMobileRequest(
       // Handle abort signal for stream cancellation
       if (signal) {
         const onAbort = () => {
+          if (attachedNativeStreamId) {
+            // The model pipeline normally holds a reader lock, which prevents
+            // ReadableStream.cancel() from reaching the underlying native source.
+            // Cancel the backend task directly as the authoritative path.
+            void cancelNativeStream(attachedNativeStreamId)
+          }
           cancelReadableStreamOnAbort(stream)
         }
         if (signal.aborted) onAbort()

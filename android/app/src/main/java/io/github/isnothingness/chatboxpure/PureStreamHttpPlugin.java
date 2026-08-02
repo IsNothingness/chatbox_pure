@@ -29,39 +29,6 @@ import java.util.UUID;
 public class PureStreamHttpPlugin extends Plugin {
     private static final String TAG = "PureStreamHttp";
 
-    private final BackgroundStreamManager.Observer observer = new BackgroundStreamManager.Observer() {
-        @Override
-        public void onChunk(String id, long sequence, String chunk) {
-            JSObject data = new JSObject();
-            data.put("id", id);
-            data.put("sequence", sequence);
-            data.put("chunk", chunk);
-            notifyListeners("chunk", data);
-        }
-
-        @Override
-        public void onEnd(String id, long lastSequence) {
-            JSObject data = new JSObject();
-            data.put("id", id);
-            data.put("lastSequence", lastSequence);
-            notifyListeners("end", data);
-        }
-
-        @Override
-        public void onError(String id, long lastSequence, String error) {
-            JSObject data = new JSObject();
-            data.put("id", id);
-            data.put("lastSequence", lastSequence);
-            data.put("error", error);
-            notifyListeners("error", data);
-        }
-    };
-
-    @Override
-    public void load() {
-        BackgroundStreamManager.getInstance(getContext()).addObserver(observer);
-    }
-
     @PluginMethod
     public void startStream(PluginCall call) {
         String urlString = call.getString("url");
@@ -138,13 +105,20 @@ public class PureStreamHttpPlugin extends Plugin {
     public void attachStream(PluginCall call) {
         String streamId = call.getString("id");
         long afterSequence = call.getLong("afterSequence", -1L);
+        int maxChunks = Math.max(1, Math.min(512, call.getInt("maxChunks", 128)));
+        int maxBytes = Math.max(32 * 1024, Math.min(1024 * 1024, call.getInt("maxBytes", 256 * 1024)));
         if (streamId == null) {
             call.reject("Stream ID is required");
             return;
         }
 
         BackgroundStreamManager.StreamSnapshot snapshot =
-            BackgroundStreamManager.getInstance(getContext()).snapshot(streamId, afterSequence);
+            BackgroundStreamManager.getInstance(getContext()).snapshot(
+                streamId,
+                afterSequence,
+                maxChunks,
+                maxBytes
+            );
         if (snapshot == null) {
             call.reject("Stream not found");
             return;
@@ -219,12 +193,6 @@ public class PureStreamHttpPlugin extends Plugin {
         call.resolve();
     }
 
-    @Override
-    protected void handleOnDestroy() {
-        BackgroundStreamManager.getInstance(getContext()).removeObserver(observer);
-        super.handleOnDestroy();
-    }
-
     private static JSObject snapshotToJs(
         BackgroundStreamManager.StreamSnapshot snapshot,
         boolean includeChunks
@@ -238,6 +206,7 @@ public class PureStreamHttpPlugin extends Plugin {
         result.put("error", snapshot.error);
         result.put("lastSequence", snapshot.lastSequence);
         result.put("createdAt", snapshot.createdAt);
+        result.put("hasMore", snapshot.hasMore);
         if (includeChunks) {
             JSArray chunks = new JSArray();
             for (BackgroundStreamManager.ChunkRecord record : snapshot.chunks) {
