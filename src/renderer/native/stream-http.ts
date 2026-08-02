@@ -75,6 +75,35 @@ interface PureStreamHttpPlugin {
 
 const PureStreamHttp = registerPlugin<PureStreamHttpPlugin>('PureStreamHttp')
 const CompatibleStreamHttp = StreamHttp as unknown as PureStreamHttpPlugin
+const READER_FINALIZATION_GRACE_MS = 30_000
+
+interface ActiveNativeStreamReader {
+  wake: () => void
+  releaseTimer?: ReturnType<typeof setTimeout>
+}
+
+const activeNativeStreamReaders = new Map<string, ActiveNativeStreamReader>()
+
+function releaseActiveNativeStreamReader(streamId: string): void {
+  const registration = activeNativeStreamReaders.get(streamId)
+  if (registration?.releaseTimer) clearTimeout(registration.releaseTimer)
+  activeNativeStreamReaders.delete(streamId)
+}
+
+export function hasActiveNativeStreamReader(streamId: string): boolean {
+  return activeNativeStreamReaders.has(streamId)
+}
+
+/**
+ * Capacitor/WebView lifecycle events can be delayed or delivered out of order after a
+ * notification opens the app. Wake every attached reader from the app-level lifecycle
+ * monitor so completed native buffers are drained without requiring the stop button.
+ */
+export function wakeNativeStreamReaders(): void {
+  for (const reader of activeNativeStreamReaders.values()) {
+    reader.wake()
+  }
+}
 
 function createStreamId(): string {
   if (typeof globalThis.crypto?.randomUUID === 'function') {
@@ -124,6 +153,8 @@ export async function acknowledgeNativeStreams(streamIds: Iterable<string>): Pro
         await PureStreamHttp.acknowledgeStream({ id })
       } catch (error) {
         console.warn(`Failed to acknowledge native stream ${id}:`, error)
+      } finally {
+        releaseActiveNativeStreamReader(id)
       }
     })
   )
@@ -173,6 +204,25 @@ function createPureAndroidReadableStream(
   const pendingChunks = new Map<number, Uint8Array>()
   let expectedSequence = 0
   let activeController: ReadableStreamDefaultController<Uint8Array> | null = null
+  let registeredStreamId: string | null = null
+
+  const unregisterReader = () => {
+    if (registeredStreamId) releaseActiveNativeStreamReader(registeredStreamId)
+    registeredStreamId = null
+  }
+
+  const retainReaderDuringFrontendFinalization = () => {
+    if (!registeredStreamId) return
+    const id = registeredStreamId
+    const registration = activeNativeStreamReaders.get(id)
+    if (!registration || registration.wake !== wakeReader) return
+    if (registration.releaseTimer) clearTimeout(registration.releaseTimer)
+    registration.releaseTimer = setTimeout(() => {
+      if (activeNativeStreamReaders.get(id) === registration) {
+        activeNativeStreamReaders.delete(id)
+      }
+    }, READER_FINALIZATION_GRACE_MS)
+  }
 
   const cleanup = () => {
     if (pullTimer) {
@@ -189,6 +239,7 @@ function createPureAndroidReadableStream(
     streamSettled = true
     activeController = null
     cleanup()
+    retainReaderDuringFrontendFinalization()
     if (type === 'error') {
       controller.error(new Error(error || 'Native stream error'))
     } else {
@@ -237,6 +288,35 @@ function createPureAndroidReadableStream(
       pullTimer = null
       void pullSnapshot()
     }, delay)
+  }
+
+  const wakeReader = () => {
+    documentVisible = document.visibilityState === 'visible'
+    if (!documentVisible || !taskReady || streamSettled || !activeController) return
+
+    // A visible document is sufficient to optimistically drain the native buffer. Refresh
+    // Capacitor state as well, but do not let a missed appStateChange event strand the cursor.
+    appActive = true
+    schedulePull(0)
+    void App.getState()
+      .then(({ isActive }) => {
+        // Some Android builds briefly report the previous inactive state while the
+        // notification-open transition is already presenting a visible WebView.
+        if (isActive) {
+          appActive = true
+          schedulePull(0)
+        }
+      })
+      .catch(() => {
+        appActive = true
+        schedulePull(0)
+      })
+  }
+
+  const registerReader = () => {
+    unregisterReader()
+    registeredStreamId = streamId
+    activeNativeStreamReaders.set(streamId, { wake: wakeReader })
   }
 
   const pullSnapshot = async () => {
@@ -300,7 +380,7 @@ function createPureAndroidReadableStream(
       }
       return
     }
-    schedulePull(0)
+    wakeReader()
   }
 
   return new ReadableStream<Uint8Array>({
@@ -318,6 +398,7 @@ function createPureAndroidReadableStream(
               }
               return
             }
+            documentVisible = document.visibilityState === 'visible'
             schedulePull(0)
           })
         ).remove
@@ -346,8 +427,9 @@ function createPureAndroidReadableStream(
           streamId = result.id
         }
         taskReady = true
+        registerReader()
         background?.onStreamAttached?.(streamId)
-        schedulePull(0)
+        wakeReader()
       } catch (error) {
         settle(controller, 'error', error instanceof Error ? error.message : 'Failed to start native stream')
       }
@@ -362,6 +444,7 @@ function createPureAndroidReadableStream(
         streamSettled = true
         activeController = null
         cleanup()
+        unregisterReader()
       }
     },
   })

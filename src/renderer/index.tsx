@@ -28,7 +28,7 @@ import './setup/load_polyfill'
 import './setup/protect'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { switchTheme } from './hooks/useAppTheme'
-import { resumeNativeBackgroundGenerations } from './setup/background_generation_recovery'
+import { initNativeBackgroundGenerationMonitor } from './setup/background_generation_recovery'
 import { initSessionAttachmentRagMaintenance } from './setup/session_attachment_rag_maintenance'
 import { initLastUsedModelStore } from './stores/lastUsedModelStore'
 import { initLoginLicenseStateReconciliation } from './stores/premiumActions'
@@ -154,7 +154,7 @@ initializeApp()
         </ErrorBoundary>
       </StrictMode>
     )
-    void resumeNativeBackgroundGenerations()
+    initNativeBackgroundGenerationMonitor()
 
     if (platform.type === 'mobile') {
       await SplashScreen.hide()

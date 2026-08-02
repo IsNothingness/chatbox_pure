@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, test, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   appActive: true,
   appStateListener: undefined as ((event: { isActive: boolean }) => void) | undefined,
+  acknowledgeStream: vi.fn(() => Promise.resolve()),
   attachStream: vi.fn(),
   cancelStream: vi.fn(() => Promise.resolve()),
   startStream: vi.fn((options: { id: string }) => Promise.resolve({ id: options.id })),
@@ -22,12 +23,18 @@ vi.mock('@capacitor/core', () => ({
   registerPlugin: vi.fn(() => ({
     startStream: mocks.startStream,
     attachStream: mocks.attachStream,
+    acknowledgeStream: mocks.acknowledgeStream,
     cancelStream: mocks.cancelStream,
   })),
 }))
 vi.mock('capacitor-stream-http', () => ({ StreamHttp: {} }))
 
-import { createNativeReadableStream } from './stream-http'
+import {
+  acknowledgeNativeStreams,
+  createNativeReadableStream,
+  hasActiveNativeStreamReader,
+  wakeNativeStreamReaders,
+} from './stream-http'
 
 describe('native pull-backed stream', () => {
   let visibilityListener: (() => void) | undefined
@@ -230,6 +237,45 @@ describe('native pull-backed stream', () => {
       maxChunks: 128,
       maxBytes: 256 * 1024,
     })
+  })
+
+  test('drains a completed native buffer when the app monitor wakes a reader after a missed lifecycle event', async () => {
+    mocks.attachStream.mockResolvedValue({
+      id: 'stream-1',
+      state: 'ended',
+      lastSequence: 0,
+      createdAt: 1,
+      chunks: [{ sequence: 0, chunk: 'completed-in-background' }],
+      hasMore: false,
+    })
+
+    const stream = createNativeReadableStream(
+      { url: 'https://example.com/stream', method: 'POST', headers: {}, body: '{}' },
+      {
+        keepAlive: true,
+        notificationTitle: 'Generating',
+        notificationBody: 'Please wait',
+        resumeStreamId: 'stream-1',
+      }
+    )
+    const reader = stream.getReader()
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(mocks.attachStream).not.toHaveBeenCalled()
+
+    // Simulate Android making the WebView visible without delivering the stream-local
+    // appStateChange/visibilitychange callback.
+    // App.getState may still expose the previous background state during the transition.
+    mocks.appActive = false
+    visibilityState = 'visible'
+    wakeNativeStreamReaders()
+
+    const result = await reader.read()
+    await expect(reader.read()).resolves.toEqual({ value: undefined, done: true })
+    expect(new TextDecoder().decode(result.value)).toBe('completed-in-background')
+    expect(hasActiveNativeStreamReader('stream-1')).toBe(true)
+
+    await acknowledgeNativeStreams(['stream-1'])
+    expect(hasActiveNativeStreamReader('stream-1')).toBe(false)
   })
 
   test('ignores an in-flight foreground read after backgrounding and re-reads it on resume', async () => {
