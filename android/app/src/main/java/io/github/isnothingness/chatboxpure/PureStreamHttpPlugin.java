@@ -57,6 +57,8 @@ public class PureStreamHttpPlugin extends Plugin {
             return;
         }
 
+        BackgroundGenerationService.configureNotificationChannels(getContext(), completionNotificationMode);
+
         Map<String, String> headers = new HashMap<>();
         Iterator<String> keys = headersObject.keys();
         while (keys.hasNext()) {
@@ -177,6 +179,13 @@ public class PureStreamHttpPlugin extends Plugin {
             return;
         }
         requestPermissionForAlias("notifications", call, "notificationPermissionCallback");
+    }
+
+    @PluginMethod
+    public void configureNotificationChannels(PluginCall call) {
+        String mode = call.getString("mode", "off");
+        BackgroundGenerationService.configureNotificationChannels(getContext(), mode);
+        call.resolve();
     }
 
     @PermissionCallback

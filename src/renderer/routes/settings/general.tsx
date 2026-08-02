@@ -24,7 +24,10 @@ import { useTranslation } from 'react-i18next'
 import { AdaptiveSelect } from '@/components/AdaptiveSelect'
 import LazySlider from '@/components/common/LazySlider'
 import { languageNameMap, languages } from '@/i18n/locales'
-import { requestGenerationNotificationPermission } from '@/native/stream-http'
+import {
+  configureGenerationNotificationChannels,
+  requestGenerationNotificationPermission,
+} from '@/native/stream-http'
 import {
   type BackupExportItem,
   type BackupProgress,
@@ -252,6 +255,7 @@ export function RouteComponent() {
                     generationCompletionNotification: 'off',
                     notifyWhenGenerationCompletes: false,
                   })
+                  void configureGenerationNotificationChannels('off')
                   return
                 }
                 void requestGenerationNotificationPermission().then((granted) => {
@@ -259,6 +263,7 @@ export function RouteComponent() {
                     generationCompletionNotification: granted ? value : 'off',
                     notifyWhenGenerationCompletes: granted,
                   })
+                  void configureGenerationNotificationChannels(granted ? value : 'off')
                 })
               }}
             />

@@ -28,6 +28,7 @@ import './setup/load_polyfill'
 import './setup/protect'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { switchTheme } from './hooks/useAppTheme'
+import { configureGenerationNotificationChannels } from './native/stream-http'
 import { initNativeBackgroundGenerationMonitor } from './setup/background_generation_recovery'
 import { initSessionAttachmentRagMaintenance } from './setup/session_attachment_rag_maintenance'
 import { initLastUsedModelStore } from './stores/lastUsedModelStore'
@@ -135,6 +136,9 @@ initializeApp()
 
     i18n.changeLanguage(settings.language)
     const resolvedTheme = await switchTheme(settings.theme)
+    await configureGenerationNotificationChannels(
+      settings.generationCompletionNotification ?? (settings.notifyWhenGenerationCompletes ? 'silent' : 'off')
+    )
     initLoginLicenseStateReconciliation()
 
     // Check the Pure repository metadata for full-package updates on every platform.

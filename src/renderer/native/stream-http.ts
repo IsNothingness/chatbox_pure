@@ -66,6 +66,9 @@ interface PureStreamHttpPlugin {
   acknowledgeStream(options: { id: string }): Promise<void>
   cancelStream(options: { id: string }): Promise<void>
   requestNotificationPermission(): Promise<{ granted: boolean }>
+  configureNotificationChannels(options: {
+    mode: 'off' | 'silent' | 'normal'
+  }): Promise<void>
   showCompletionNotification(options: { title: string; body: string; mode?: 'silent' | 'normal' }): Promise<void>
   addListener(
     eventName: 'chunk' | 'end' | 'error',
@@ -119,6 +122,15 @@ export async function requestGenerationNotificationPermission(): Promise<boolean
   } catch (error) {
     console.warn('Failed to request generation notification permission:', error)
     return false
+  }
+}
+
+export async function configureGenerationNotificationChannels(mode: 'off' | 'silent' | 'normal'): Promise<void> {
+  if (CHATBOX_BUILD_PLATFORM !== 'android') return
+  try {
+    await PureStreamHttp.configureNotificationChannels({ mode })
+  } catch (error) {
+    console.warn('Failed to configure generation notification channels:', error)
   }
 }
 

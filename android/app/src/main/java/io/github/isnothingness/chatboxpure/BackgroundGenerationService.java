@@ -34,6 +34,7 @@ public class BackgroundGenerationService extends Service {
     private static final String EXTRA_BODY = "body";
 
     private static final String ACTIVE_CHANNEL_ID = "background_generation";
+    private static final String LEGACY_COMPLETION_CHANNEL_ID = "generation_complete";
     private static final String SILENT_COMPLETION_CHANNEL_ID = "generation_complete_silent_v2";
     private static final String ALERT_COMPLETION_CHANNEL_ID = "generation_complete_alert_v2";
     private static final int ACTIVE_NOTIFICATION_ID = 41001;
@@ -93,7 +94,7 @@ public class BackgroundGenerationService extends Service {
         String body,
         String mode
     ) {
-        createChannels(context);
+        configureNotificationChannels(context, mode);
         boolean silent = !"normal".equals(mode);
         String channelId = silent ? SILENT_COMPLETION_CHANNEL_ID : ALERT_COMPLETION_CHANNEL_ID;
         int notificationId = streamId == null
@@ -121,7 +122,8 @@ public class BackgroundGenerationService extends Service {
     public void onCreate() {
         super.onCreate();
         runningInstance = this;
-        createChannels(this);
+        createActiveChannel(this);
+        deleteChannel(this, LEGACY_COMPLETION_CHANNEL_ID);
         PowerManager powerManager = (PowerManager) getSystemService(Context.POWER_SERVICE);
         generationWakeLock = powerManager.newWakeLock(
             PowerManager.PARTIAL_WAKE_LOCK,
@@ -223,7 +225,26 @@ public class BackgroundGenerationService extends Service {
         );
     }
 
-    private static void createChannels(Context context) {
+    public static void configureNotificationChannels(Context context, String mode) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
+
+        createActiveChannel(context);
+        NotificationManager manager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+        manager.deleteNotificationChannel(LEGACY_COMPLETION_CHANNEL_ID);
+
+        if ("normal".equals(mode)) {
+            manager.deleteNotificationChannel(SILENT_COMPLETION_CHANNEL_ID);
+            createAlertCompletionChannel(context, manager);
+        } else if ("silent".equals(mode)) {
+            manager.deleteNotificationChannel(ALERT_COMPLETION_CHANNEL_ID);
+            createSilentCompletionChannel(context, manager);
+        } else {
+            manager.deleteNotificationChannel(SILENT_COMPLETION_CHANNEL_ID);
+            manager.deleteNotificationChannel(ALERT_COMPLETION_CHANNEL_ID);
+        }
+    }
+
+    private static void createActiveChannel(Context context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
 
         NotificationManager manager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
@@ -234,7 +255,10 @@ public class BackgroundGenerationService extends Service {
         );
         activeChannel.setDescription(context.getString(R.string.background_generation_channel_description));
         activeChannel.setSound(null, null);
+        manager.createNotificationChannel(activeChannel);
+    }
 
+    private static void createSilentCompletionChannel(Context context, NotificationManager manager) {
         NotificationChannel silentCompletionChannel = new NotificationChannel(
             SILENT_COMPLETION_CHANNEL_ID,
             context.getString(R.string.generation_complete_silent_channel),
@@ -245,7 +269,10 @@ public class BackgroundGenerationService extends Service {
         );
         silentCompletionChannel.setSound(null, null);
         silentCompletionChannel.enableVibration(false);
+        manager.createNotificationChannel(silentCompletionChannel);
+    }
 
+    private static void createAlertCompletionChannel(Context context, NotificationManager manager) {
         NotificationChannel alertCompletionChannel = new NotificationChannel(
             ALERT_COMPLETION_CHANNEL_ID,
             context.getString(R.string.generation_complete_alert_channel),
@@ -255,10 +282,13 @@ public class BackgroundGenerationService extends Service {
             context.getString(R.string.generation_complete_alert_channel_description)
         );
         alertCompletionChannel.enableVibration(true);
-
-        manager.createNotificationChannel(activeChannel);
-        manager.createNotificationChannel(silentCompletionChannel);
         manager.createNotificationChannel(alertCompletionChannel);
+    }
+
+    private static void deleteChannel(Context context, String channelId) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
+        NotificationManager manager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+        manager.deleteNotificationChannel(channelId);
     }
 
     private static String valueOrDefault(String value, String fallback) {
