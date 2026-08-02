@@ -7,11 +7,13 @@ import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.PowerManager;
+import android.service.notification.StatusBarNotification;
 
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
@@ -80,16 +82,17 @@ public class BackgroundGenerationService extends Service {
     }
 
     public static void showCompletionNotification(Context context, String title, String body) {
-        showCompletionNotification(context, null, title, body, "silent");
+        showCompletionNotification(context, null, null, title, body, "silent");
     }
 
     public static void showCompletionNotification(Context context, String title, String body, String mode) {
-        showCompletionNotification(context, null, title, body, mode);
+        showCompletionNotification(context, null, null, title, body, mode);
     }
 
     public static void showCompletionNotification(
         Context context,
         String streamId,
+        String sessionId,
         String title,
         String body,
         String mode
@@ -107,7 +110,7 @@ public class BackgroundGenerationService extends Service {
                 .setSmallIcon(android.R.drawable.stat_notify_chat)
                 .setContentTitle(title)
                 .setContentText(body)
-                .setContentIntent(openAppIntent(context, notificationId))
+                .setContentIntent(openAppIntent(context, notificationId, sessionId))
                 .setAutoCancel(true)
                 .setCategory(NotificationCompat.CATEGORY_MESSAGE)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
@@ -116,6 +119,19 @@ public class BackgroundGenerationService extends Service {
                 .setDefaults(silent ? 0 : NotificationCompat.DEFAULT_ALL)
                 .build()
         );
+    }
+
+    public static void clearCompletionNotifications(Context context) {
+        NotificationManager manager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+        for (StatusBarNotification notification : manager.getActiveNotifications()) {
+            int notificationId = notification.getId();
+            if (
+                notificationId >= COMPLETION_NOTIFICATION_ID_BASE &&
+                notificationId <= COMPLETION_NOTIFICATION_ID_BASE + 0x0fff
+            ) {
+                manager.cancel(notificationId);
+            }
+        }
     }
 
     @Override
@@ -215,8 +231,26 @@ public class BackgroundGenerationService extends Service {
     }
 
     private static PendingIntent openAppIntent(Context context, int requestCode) {
+        return openAppIntent(context, requestCode, null);
+    }
+
+    private static PendingIntent openAppIntent(
+        Context context,
+        int requestCode,
+        String sessionId
+    ) {
         Intent launchIntent = new Intent(context, MainActivity.class)
             .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        if (sessionId != null && !sessionId.isEmpty()) {
+            launchIntent.setAction(Intent.ACTION_VIEW);
+            launchIntent.setData(
+                new Uri.Builder()
+                    .scheme("chatbox-pure")
+                    .authority("session")
+                    .appendPath(sessionId)
+                    .build()
+            );
+        }
         return PendingIntent.getActivity(
             context,
             requestCode,

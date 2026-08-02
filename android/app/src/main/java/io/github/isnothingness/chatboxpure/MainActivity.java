@@ -59,6 +59,7 @@ public class MainActivity extends BridgeActivity {
     public void onStart() {
         super.onStart();
         appVisible = true;
+        BackgroundGenerationService.clearCompletionNotifications(this);
     }
 
     @Override

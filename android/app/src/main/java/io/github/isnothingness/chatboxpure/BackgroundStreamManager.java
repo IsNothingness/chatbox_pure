@@ -656,6 +656,7 @@ final class BackgroundStreamManager {
             BackgroundGenerationService.showCompletionNotification(
                 appContext,
                 task.id,
+                task.sessionId,
                 task.completionTitle,
                 task.completionBody,
                 task.completionNotificationMode

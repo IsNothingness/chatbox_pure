@@ -54,6 +54,8 @@ export default class MobilePlatform extends MobileSQLiteStorage implements Platf
   public exporter = new MobileExporter()
 
   private navigationCallback: ((path: string) => void) | null = null
+  private pendingNavigationPath: string | null = null
+  private lastHandledDeepLink: { url: string; timestamp: number } | null = null
   private _imageGenerationStorage: ImageGenerationStorage | null = null
   private _sessionMetaStorage: SessionMetaStorage | null = null
 
@@ -65,11 +67,24 @@ export default class MobilePlatform extends MobileSQLiteStorage implements Platf
       console.debug('App URL opened:', event.url)
       this.handleDeepLink(event.url)
     })
+    void App.getLaunchUrl()
+      .then((launch) => {
+        if (launch?.url) this.handleDeepLink(launch.url)
+      })
+      .catch((error) => {
+        console.warn('Failed to read initial app URL:', error)
+      })
   }
 
   // 处理深度链接
   private handleDeepLink(url: string): void {
     try {
+      const now = Date.now()
+      if (this.lastHandledDeepLink?.url === url && now - this.lastHandledDeepLink.timestamp < 2000) {
+        return
+      }
+      this.lastHandledDeepLink = { url, timestamp: now }
+
       // 支持 chatbox:// 和 chatbox-dev:// 两种协议（归一化处理）
       const normalizedUrl = url.replace(/^chatbox-dev:\/\//, 'chatbox://')
       const parsedUrl = new URL(normalizedUrl)
@@ -80,6 +95,14 @@ export default class MobilePlatform extends MobileSQLiteStorage implements Platf
         const path = `/settings/provider?import=${encodeURIComponent(encodedConfig)}`
         this.triggerNavigation(path)
         return
+      }
+
+      if (parsedUrl.hostname === 'session') {
+        const sessionId = decodeURIComponent(parsedUrl.pathname.replace(/^\/+/, ''))
+        if (sessionId) {
+          this.triggerNavigation(`/session/${sessionId}`)
+          return
+        }
       }
 
       // 处理 auth 回调链接: chatbox://auth/callback?ticket_id=xxx&status=success
@@ -98,13 +121,18 @@ export default class MobilePlatform extends MobileSQLiteStorage implements Platf
     if (this.navigationCallback) {
       this.navigationCallback(path)
     } else {
-      console.warn('Navigation callback not set, path:', path)
+      this.pendingNavigationPath = path
     }
   }
 
   // 设置导航回调（类似 electronAPI.onNavigate）
   public onNavigate(callback: (path: string) => void): () => void {
     this.navigationCallback = callback
+    if (this.pendingNavigationPath) {
+      const pendingPath = this.pendingNavigationPath
+      this.pendingNavigationPath = null
+      callback(pendingPath)
+    }
     return () => {
       this.navigationCallback = null
     }
