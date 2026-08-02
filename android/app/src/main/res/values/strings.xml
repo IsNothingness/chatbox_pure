@@ -8,4 +8,8 @@
     <string name="background_generation_channel_description">Keeps replies generating while the app is in the background</string>
     <string name="generation_complete_channel">Completed replies</string>
     <string name="generation_complete_channel_description">Notifies you when a reply has finished generating</string>
+    <string name="generation_complete_silent_channel">Completed replies (silent)</string>
+    <string name="generation_complete_silent_channel_description">Shows completed replies without sound or vibration</string>
+    <string name="generation_complete_alert_channel">Completed replies (sound and vibration)</string>
+    <string name="generation_complete_alert_channel_description">Alerts you with sound or vibration when a reply has finished</string>
 </resources>

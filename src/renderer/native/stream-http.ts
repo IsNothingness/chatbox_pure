@@ -38,6 +38,7 @@ interface PureStartStreamOptions extends StartStreamOptions {
   notificationTitle?: string
   notificationBody?: string
   notifyWhenComplete?: boolean
+  completionNotificationMode?: 'off' | 'silent' | 'normal'
   completionTitle?: string
   completionBody?: string
   clientRequestId?: string
@@ -65,7 +66,7 @@ interface PureStreamHttpPlugin {
   acknowledgeStream(options: { id: string }): Promise<void>
   cancelStream(options: { id: string }): Promise<void>
   requestNotificationPermission(): Promise<{ granted: boolean }>
-  showCompletionNotification(options: { title: string; body: string }): Promise<void>
+  showCompletionNotification(options: { title: string; body: string; mode?: 'silent' | 'normal' }): Promise<void>
   addListener(
     eventName: 'chunk' | 'end' | 'error',
     listenerFunc: (data: PureStreamEvent) => void
@@ -92,10 +93,14 @@ export async function requestGenerationNotificationPermission(): Promise<boolean
   }
 }
 
-export async function showGenerationCompleteNotification(title: string, body: string): Promise<void> {
+export async function showGenerationCompleteNotification(
+  title: string,
+  body: string,
+  mode: 'silent' | 'normal' = 'silent'
+): Promise<void> {
   if (CHATBOX_BUILD_PLATFORM !== 'android') return
   try {
-    await PureStreamHttp.showCompletionNotification({ title, body })
+    await PureStreamHttp.showCompletionNotification({ title, body, mode })
   } catch (error) {
     console.warn('Failed to show generation completion notification:', error)
   }
@@ -138,6 +143,7 @@ interface BackgroundStreamOptions {
   notificationTitle: string
   notificationBody: string
   notifyWhenComplete?: boolean
+  completionNotificationMode?: 'off' | 'silent' | 'normal'
   completionTitle?: string
   completionBody?: string
   clientRequestId?: string
@@ -330,6 +336,7 @@ function createPureAndroidReadableStream(
             notificationTitle: background?.notificationTitle,
             notificationBody: background?.notificationBody,
             notifyWhenComplete: background?.notifyWhenComplete,
+            completionNotificationMode: background?.completionNotificationMode,
             completionTitle: background?.completionTitle,
             completionBody: background?.completionBody,
             clientRequestId: background?.clientRequestId,

@@ -248,6 +248,7 @@ describe('ZIP backup round trip', () => {
       providers: { custom: { apiKey: 'secret-api-key', apiHost: 'https://example.com' } },
       keepGeneratingInBackground: true,
       notifyWhenGenerationCompletes: true,
+      generationCompletionNotification: 'silent',
       conversationListMenu: {
         pin: false,
         edit: true,
@@ -299,6 +300,7 @@ describe('ZIP backup round trip', () => {
       providers: { custom: { apiHost: 'https://example.com' } },
       keepGeneratingInBackground: true,
       notifyWhenGenerationCompletes: true,
+      generationCompletionNotification: 'silent',
       conversationListMenu: {
         pin: false,
         edit: true,

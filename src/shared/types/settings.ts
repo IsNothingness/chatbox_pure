@@ -528,7 +528,8 @@ export const SettingsSchema = GlobalSessionSettingsSchema.extend({
 
   // Android generation lifecycle and notifications
   keepGeneratingInBackground: z.boolean().default(true),
-  notifyWhenGenerationCompletes: z.boolean().default(false),
+  notifyWhenGenerationCompletes: z.boolean().default(true),
+  generationCompletionNotification: z.enum(['off', 'silent', 'normal']).optional().catch(undefined),
 
   // disableQuickToggleShortcut?: boolean // 是否关闭快捷键切换窗口显隐（弃用，为了兼容历史数据，这个字段永远不要使用）
 

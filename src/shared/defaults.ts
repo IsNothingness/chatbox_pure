@@ -92,7 +92,9 @@ export function settings(): Settings {
     fontSize: 14,
     spellCheck: true,
     keepGeneratingInBackground: true,
-    notifyWhenGenerationCompletes: false,
+    // Keep the legacy boolean synchronized so older Pure builds can still read backups.
+    notifyWhenGenerationCompletes: true,
+    generationCompletionNotification: 'silent',
 
     defaultPrompt: getDefaultPrompt(),
 

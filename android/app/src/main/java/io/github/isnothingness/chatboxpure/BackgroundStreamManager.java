@@ -110,7 +110,7 @@ final class BackgroundStreamManager {
         final String sessionId;
         final String messageId;
         final boolean keepAlive;
-        final boolean notifyWhenComplete;
+        final String completionNotificationMode;
         final String completionTitle;
         final String completionBody;
         final long createdAt;
@@ -138,7 +138,7 @@ final class BackgroundStreamManager {
             String sessionId,
             String messageId,
             boolean keepAlive,
-            boolean notifyWhenComplete,
+            String completionNotificationMode,
             String completionTitle,
             String completionBody,
             StreamRequest request
@@ -149,7 +149,7 @@ final class BackgroundStreamManager {
                 sessionId,
                 messageId,
                 keepAlive,
-                notifyWhenComplete,
+                completionNotificationMode,
                 completionTitle,
                 completionBody,
                 request,
@@ -163,7 +163,7 @@ final class BackgroundStreamManager {
             String sessionId,
             String messageId,
             boolean keepAlive,
-            boolean notifyWhenComplete,
+            String completionNotificationMode,
             String completionTitle,
             String completionBody,
             StreamRequest request,
@@ -174,7 +174,7 @@ final class BackgroundStreamManager {
             this.sessionId = sessionId;
             this.messageId = messageId;
             this.keepAlive = keepAlive;
-            this.notifyWhenComplete = notifyWhenComplete;
+            this.completionNotificationMode = completionNotificationMode;
             this.completionTitle = completionTitle;
             this.completionBody = completionBody;
             this.request = request;
@@ -213,7 +213,7 @@ final class BackgroundStreamManager {
         String sessionId,
         String messageId,
         boolean keepAlive,
-        boolean notifyWhenComplete,
+        String completionNotificationMode,
         String completionTitle,
         String completionBody,
         StreamRequest request
@@ -225,7 +225,7 @@ final class BackgroundStreamManager {
             sessionId,
             messageId,
             keepAlive,
-            notifyWhenComplete,
+            completionNotificationMode,
             completionTitle,
             completionBody,
             request
@@ -644,7 +644,7 @@ final class BackgroundStreamManager {
                 if (
                     STATE_ENDED.equals(task.state) &&
                     task.keepAlive &&
-                    task.notifyWhenComplete &&
+                    !"off".equals(task.completionNotificationMode) &&
                     !task.completionNotified
                 ) {
                     task.completionNotified = true;
@@ -657,7 +657,8 @@ final class BackgroundStreamManager {
                 appContext,
                 task.id,
                 task.completionTitle,
-                task.completionBody
+                task.completionBody,
+                task.completionNotificationMode
             );
         }
         return true;
@@ -671,7 +672,7 @@ final class BackgroundStreamManager {
                 stored.sessionId,
                 stored.messageId,
                 false,
-                false,
+                "off",
                 "",
                 "",
                 null,

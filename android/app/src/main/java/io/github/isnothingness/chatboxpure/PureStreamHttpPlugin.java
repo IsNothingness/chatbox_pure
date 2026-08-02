@@ -38,6 +38,10 @@ public class PureStreamHttpPlugin extends Plugin {
         String body = call.getString("body");
         boolean keepAlive = Boolean.TRUE.equals(call.getBoolean("keepAlive", false));
         boolean notifyWhenComplete = Boolean.TRUE.equals(call.getBoolean("notifyWhenComplete", false));
+        String completionNotificationMode = call.getString(
+            "completionNotificationMode",
+            notifyWhenComplete ? "silent" : "off"
+        );
         String notificationTitle = call.getString("notificationTitle", "ChatBox Pure");
         String notificationBody = call.getString("notificationBody", "Generating a reply");
         String completionTitle = call.getString("completionTitle", "Reply generated");
@@ -70,7 +74,7 @@ public class PureStreamHttpPlugin extends Plugin {
             sessionId,
             messageId,
             keepAlive,
-            notifyWhenComplete,
+            completionNotificationMode,
             completionTitle,
             completionBody,
             new BackgroundStreamManager.StreamRequest(urlString, method, headers, body)
@@ -190,7 +194,8 @@ public class PureStreamHttpPlugin extends Plugin {
     public void showCompletionNotification(PluginCall call) {
         String title = call.getString("title", "ChatBox Pure");
         String body = call.getString("body", "Reply generated");
-        BackgroundGenerationService.showCompletionNotification(getContext(), title, body);
+        String mode = call.getString("mode", "silent");
+        BackgroundGenerationService.showCompletionNotification(getContext(), title, body, mode);
         call.resolve();
     }
 

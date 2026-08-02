@@ -34,7 +34,8 @@ public class BackgroundGenerationService extends Service {
     private static final String EXTRA_BODY = "body";
 
     private static final String ACTIVE_CHANNEL_ID = "background_generation";
-    private static final String COMPLETION_CHANNEL_ID = "generation_complete";
+    private static final String SILENT_COMPLETION_CHANNEL_ID = "generation_complete_silent_v2";
+    private static final String ALERT_COMPLETION_CHANNEL_ID = "generation_complete_alert_v2";
     private static final int ACTIVE_NOTIFICATION_ID = 41001;
     private static final int COMPLETION_NOTIFICATION_ID_BASE = 42000;
     private static final long GENERATION_WAKE_LOCK_TIMEOUT_MS = 60L * 60L * 1000L;
@@ -78,30 +79,40 @@ public class BackgroundGenerationService extends Service {
     }
 
     public static void showCompletionNotification(Context context, String title, String body) {
-        showCompletionNotification(context, null, title, body);
+        showCompletionNotification(context, null, title, body, "silent");
+    }
+
+    public static void showCompletionNotification(Context context, String title, String body, String mode) {
+        showCompletionNotification(context, null, title, body, mode);
     }
 
     public static void showCompletionNotification(
         Context context,
         String streamId,
         String title,
-        String body
+        String body,
+        String mode
     ) {
         createChannels(context);
+        boolean silent = !"normal".equals(mode);
+        String channelId = silent ? SILENT_COMPLETION_CHANNEL_ID : ALERT_COMPLETION_CHANNEL_ID;
         int notificationId = streamId == null
             ? COMPLETION_NOTIFICATION_ID_BASE
             : COMPLETION_NOTIFICATION_ID_BASE + (streamId.hashCode() & 0x0fff);
         NotificationManager manager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
         manager.notify(
             notificationId,
-            new NotificationCompat.Builder(context, COMPLETION_CHANNEL_ID)
+            new NotificationCompat.Builder(context, channelId)
                 .setSmallIcon(android.R.drawable.stat_notify_chat)
                 .setContentTitle(title)
                 .setContentText(body)
                 .setContentIntent(openAppIntent(context, notificationId))
                 .setAutoCancel(true)
                 .setCategory(NotificationCompat.CATEGORY_MESSAGE)
-                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setSilent(silent)
+                .setOnlyAlertOnce(true)
+                .setDefaults(silent ? 0 : NotificationCompat.DEFAULT_ALL)
                 .build()
         );
     }
@@ -224,15 +235,30 @@ public class BackgroundGenerationService extends Service {
         activeChannel.setDescription(context.getString(R.string.background_generation_channel_description));
         activeChannel.setSound(null, null);
 
-        NotificationChannel completionChannel = new NotificationChannel(
-            COMPLETION_CHANNEL_ID,
-            context.getString(R.string.generation_complete_channel),
-            NotificationManager.IMPORTANCE_DEFAULT
+        NotificationChannel silentCompletionChannel = new NotificationChannel(
+            SILENT_COMPLETION_CHANNEL_ID,
+            context.getString(R.string.generation_complete_silent_channel),
+            NotificationManager.IMPORTANCE_HIGH
         );
-        completionChannel.setDescription(context.getString(R.string.generation_complete_channel_description));
+        silentCompletionChannel.setDescription(
+            context.getString(R.string.generation_complete_silent_channel_description)
+        );
+        silentCompletionChannel.setSound(null, null);
+        silentCompletionChannel.enableVibration(false);
+
+        NotificationChannel alertCompletionChannel = new NotificationChannel(
+            ALERT_COMPLETION_CHANNEL_ID,
+            context.getString(R.string.generation_complete_alert_channel),
+            NotificationManager.IMPORTANCE_HIGH
+        );
+        alertCompletionChannel.setDescription(
+            context.getString(R.string.generation_complete_alert_channel_description)
+        );
+        alertCompletionChannel.enableVibration(true);
 
         manager.createNotificationChannel(activeChannel);
-        manager.createNotificationChannel(completionChannel);
+        manager.createNotificationChannel(silentCompletionChannel);
+        manager.createNotificationChannel(alertCompletionChannel);
     }
 
     private static String valueOrDefault(String value, String fallback) {

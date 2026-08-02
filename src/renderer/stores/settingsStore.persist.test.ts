@@ -147,7 +147,7 @@ describe('settingsStore persistence', () => {
           apiHost: 'https://api.openai.com',
         },
       },
-      __version: 6,
+      __version: 7,
     })
   })
 
@@ -191,7 +191,23 @@ describe('settingsStore persistence', () => {
       delete: true,
     })
     expect(hydrated.keepGeneratingInBackground).toBe(true)
-    expect(hydrated.notifyWhenGenerationCompletes).toBe(false)
+    expect(hydrated.notifyWhenGenerationCompletes).toBe(true)
+    expect(hydrated.generationCompletionNotification).toBe('silent')
+  })
+
+  it.each([
+    [false, 'off'],
+    [true, 'silent'],
+  ] as const)('migrates the legacy completion notification value %s to %s', async (legacyValue, expectedMode) => {
+    const { initSettingsStore } = await loadSettingsStoreModule({
+      notifyWhenGenerationCompletes: legacyValue,
+      __version: 6,
+    })
+
+    const hydrated = await initSettingsStore()
+
+    expect(hydrated.notifyWhenGenerationCompletes).toBe(legacyValue)
+    expect(hydrated.generationCompletionNotification).toBe(expectedMode)
   })
 
   it.each([

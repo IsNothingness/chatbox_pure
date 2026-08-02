@@ -39,6 +39,7 @@ vi.mock('@/stores/settingsStore', () => ({
       getSettings: () => ({
         keepGeneratingInBackground: true,
         notifyWhenGenerationCompletes: true,
+        generationCompletionNotification: 'silent',
       }),
     }),
   },
@@ -69,12 +70,23 @@ describe('mobile background request cancellation', () => {
     controller.abort()
     await vi.waitFor(() => expect(mocks.cancelNativeStream).toHaveBeenCalledWith('native-stream-1'))
     expect(mocks.recordAttached).toHaveBeenCalledWith(controller.signal, 'native-stream-1')
+    expect(mocks.createNativeStream).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        notifyWhenComplete: true,
+        completionNotificationMode: 'silent',
+      })
+    )
   })
 
   test.each([
-    ['Gemini SSE URL', 'https://example.com/v1beta/models/gemini:streamGenerateContent?alt=sse'],
-    ['Bedrock binary event stream', 'https://bedrock.example.com/model/test/converse-stream'],
-  ])('routes %s through the native stream without a stream body flag', async (_name, url) => {
+    ['Gemini SSE URL', 'https://example.com/v1beta/models/gemini:streamGenerateContent?alt=sse', 'text/event-stream'],
+    [
+      'Bedrock binary event stream',
+      'https://bedrock.example.com/model/test/converse-stream',
+      'application/vnd.amazon.eventstream',
+    ],
+  ])('routes %s through the native stream without a stream body flag', async (_name, url, contentType) => {
     const response = await handleMobileRequest(
       url,
       'POST',
@@ -83,8 +95,12 @@ describe('mobile background request cancellation', () => {
     )
 
     expect(mocks.createNativeStream).toHaveBeenCalledOnce()
-    expect(response.headers.get('Content-Type')).toBe(
-      url.includes('converse-stream') ? 'application/vnd.amazon.eventstream' : 'text/event-stream'
+    expect(mocks.createNativeStream).toHaveBeenCalledWith(
+      expect.objectContaining({
+        headers: expect.objectContaining({ Accept: contentType }),
+      }),
+      expect.anything()
     )
+    expect(response.headers.get('Content-Type')).toBe(contentType)
   })
 })

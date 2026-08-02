@@ -35,6 +35,15 @@ function mergeWithDefaultSettings(persisted: unknown): Settings {
   const mergedSettings = deepmerge<Settings, Partial<Settings>>(defaults.settings(), persistedSettings, {
     arrayMerge: (_target, source) => source,
   })
+  if (persistedSettings.generationCompletionNotification === undefined) {
+    mergedSettings.generationCompletionNotification =
+      persistedSettings.notifyWhenGenerationCompletes === undefined
+        ? defaults.settings().generationCompletionNotification
+        : persistedSettings.notifyWhenGenerationCompletes
+          ? 'silent'
+          : 'off'
+  }
+  mergedSettings.notifyWhenGenerationCompletes = mergedSettings.generationCompletionNotification !== 'off'
   if (mergedSettings.extension.webSearch.provider === 'build-in') {
     mergedSettings.extension.webSearch.provider = 'bing'
   }
@@ -80,7 +89,7 @@ export const settingsStore = createStore<Settings & Action>()(
           },
           removeItem: async (name) => await storage.removeItem(name),
         })),
-        version: 6,
+        version: 7,
         partialize: (state) => {
           try {
             return SettingsSchema.parse(state)
@@ -93,10 +102,21 @@ export const settingsStore = createStore<Settings & Action>()(
           ...mergeWithDefaultSettings(persisted),
         }),
         migrate: (persisted: any, version) => {
+          const legacyCompletionNotification = persisted?.notifyWhenGenerationCompletes
+          const persistedCompletionMode = persisted?.generationCompletionNotification
           // merge the newly added fields in defaults.settings() into the persisted values (deep merge).
           const settings: any = deepmerge(defaults.settings(), persisted, {
             arrayMerge: (_target, source) => source,
           })
+
+          settings.generationCompletionNotification =
+            persistedCompletionMode ??
+            (legacyCompletionNotification === undefined
+              ? defaults.settings().generationCompletionNotification
+              : legacyCompletionNotification
+                ? 'silent'
+                : 'off')
+          settings.notifyWhenGenerationCompletes = settings.generationCompletionNotification !== 'off'
 
           switch (version) {
             case 0:
@@ -121,6 +141,7 @@ export const settingsStore = createStore<Settings & Action>()(
             case 3:
             case 4:
             case 5:
+            case 6:
               if (settings.extension?.webSearch?.provider === 'build-in') {
                 settings.extension.webSearch.provider = 'bing'
               }

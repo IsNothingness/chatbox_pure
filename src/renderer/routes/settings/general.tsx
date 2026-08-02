@@ -50,6 +50,8 @@ export const Route = createFileRoute('/settings/general')({
 export function RouteComponent() {
   const { t } = useTranslation()
   const { setSettings, ...settings } = useSettingsStore((state) => state)
+  const completionNotificationMode =
+    settings.generationCompletionNotification ?? (settings.notifyWhenGenerationCompletes ? 'silent' : 'off')
 
   return (
     <Stack p="md" gap="xl">
@@ -230,19 +232,33 @@ export function RouteComponent() {
                 }
               }}
             />
-            <Switch
-              label={t('Notify me when generation completes')}
+            <AdaptiveSelect
+              maw={320}
+              label={t('Generation completion notification')}
               description={t('Only sends a notification when ChatBox Pure is not visible.')}
-              checked={settings.notifyWhenGenerationCompletes}
+              data={[
+                { value: 'off', label: t('Off') },
+                { value: 'silent', label: t('Silent') },
+                { value: 'normal', label: t('Sound and vibration') },
+              ]}
+              value={completionNotificationMode}
               disabled={!settings.keepGeneratingInBackground}
-              onChange={(event) => {
-                const checked = event.currentTarget.checked
-                if (!checked) {
-                  setSettings({ notifyWhenGenerationCompletes: false })
+              onChange={(value) => {
+                if (value !== 'off' && value !== 'silent' && value !== 'normal') {
+                  return
+                }
+                if (value === 'off') {
+                  setSettings({
+                    generationCompletionNotification: 'off',
+                    notifyWhenGenerationCompletes: false,
+                  })
                   return
                 }
                 void requestGenerationNotificationPermission().then((granted) => {
-                  setSettings({ notifyWhenGenerationCompletes: granted })
+                  setSettings({
+                    generationCompletionNotification: granted ? value : 'off',
+                    notifyWhenGenerationCompletes: granted,
+                  })
                 })
               }}
             />

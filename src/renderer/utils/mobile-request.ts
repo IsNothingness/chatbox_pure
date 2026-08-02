@@ -87,10 +87,12 @@ export async function handleMobileRequest(
       // Add SSE Accept header for proper content negotiation
       const streamHeaders = {
         ...headerObj,
-        Accept: 'text/event-stream',
+        Accept: getNativeResponseContentType(url, headers),
       }
 
       const settings = settingsStore.getState().getSettings()
+      const completionNotificationMode =
+        settings.generationCompletionNotification ?? (settings.notifyWhenGenerationCompletes ? 'silent' : 'off')
       const generationContext = consumeNativeGenerationContext(signal)
       let attachedNativeStreamId: string | undefined
       if (settings.keepGeneratingInBackground && !generationContext?.resumeStreamId) {
@@ -110,7 +112,8 @@ export async function handleMobileRequest(
           keepAlive: settings.keepGeneratingInBackground,
           notificationTitle: i18n.t('ChatBox Pure is generating a reply'),
           notificationBody: i18n.t('You can leave the app or turn off the screen.'),
-          notifyWhenComplete: settings.notifyWhenGenerationCompletes,
+          notifyWhenComplete: completionNotificationMode !== 'off',
+          completionNotificationMode,
           completionTitle: i18n.t('Reply generated') || 'Reply generated',
           completionBody:
             i18n.t('Tap to return to ChatBox Pure and view the reply.') ||
