@@ -43,6 +43,7 @@ export default class AzureOpenAI extends AbstractAISDKModel {
       apiKey: this.options.azureApikey,
       baseURL: normalizeAzureEndpoint(this.options.azureEndpoint).endpoint,
       useDeploymentBasedUrls: false,
+      fetch: this.getPlatformFetch(),
     })
   }
 

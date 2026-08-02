@@ -31,10 +31,12 @@ export default class Bedrock extends AbstractAISDKModel {
       accessKeyId: string
       secretAccessKey: string
       sessionToken?: string
+      fetch: typeof globalThis.fetch
     } = {
       region: this.options.region,
       accessKeyId: this.options.accessKey,
       secretAccessKey: this.options.secretKey,
+      fetch: this.getPlatformFetch(),
     }
 
     if (this.options.sessionToken) {

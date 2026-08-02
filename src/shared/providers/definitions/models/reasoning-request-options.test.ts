@@ -39,7 +39,7 @@ type ResolveCallSettingsHarness = {
 function createDependencies(): ModelDependencies {
   return {
     request: {
-      apiRequest: vi.fn(),
+      apiRequest: vi.fn(async () => new Response('{}')),
       fetchWithOptions: vi.fn(),
     },
     storage: {
@@ -121,33 +121,29 @@ describe('reasoning request options', () => {
     })
   })
 
-  it('binds the default global fetch when wrapping Claude requests', async () => {
-    let fetchThis: unknown
-    const globalFetch = function (this: unknown, _input: RequestInfo | URL, _init?: RequestInit) {
-      fetchThis = this
-      return Promise.resolve(new Response('{}'))
-    } as typeof globalThis.fetch
-    vi.stubGlobal('fetch', globalFetch)
-    try {
-      const claude = new Claude(
-        {
-          claudeApiKey: 'test-key',
-          claudeApiHost: 'https://api.anthropic.com/v1',
-          model: reasoningModel('claude-sonnet-4-6'),
-        },
-        createDependencies()
-      )
+  it('routes the default Claude fetch through the platform request adapter', async () => {
+    const dependencies = createDependencies()
+    const claude = new Claude(
+      {
+        claudeApiKey: 'test-key',
+        claudeApiHost: 'https://api.anthropic.com/v1',
+        model: reasoningModel('claude-sonnet-4-6'),
+      },
+      dependencies
+    )
 
-      const wrappedFetch = (claude as unknown as ClaudeFetchHarness).createFetch()
-      await wrappedFetch?.('https://api.anthropic.com/v1/messages', {
+    const wrappedFetch = (claude as unknown as ClaudeFetchHarness).createFetch()
+    await wrappedFetch?.('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    })
+
+    expect(dependencies.request.apiRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: 'https://api.anthropic.com/v1/messages',
         method: 'POST',
-        body: JSON.stringify({}),
       })
-
-      expect(fetchThis).toBe(globalThis)
-    } finally {
-      vi.unstubAllGlobals()
-    }
+    )
   })
 
   it('converts Claude Opus 4.8 effort requests to adaptive summarized thinking before fetch', async () => {

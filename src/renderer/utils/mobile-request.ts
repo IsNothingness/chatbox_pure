@@ -18,6 +18,42 @@ function isLockedStreamCancelError(error: unknown): boolean {
   )
 }
 
+function hasStreamingBody(body: RequestInit['body']): boolean {
+  if (typeof body !== 'string') return false
+  try {
+    const parsed = JSON.parse(body) as { stream?: unknown }
+    return parsed.stream === true
+  } catch {
+    return false
+  }
+}
+
+function isNativeStreamingRequest(url: string, headers: Headers, body: RequestInit['body']): boolean {
+  const normalizedUrl = url.toLowerCase()
+  const accept = headers.get('accept')?.toLowerCase() || ''
+  return (
+    hasStreamingBody(body) ||
+    accept.includes('text/event-stream') ||
+    accept.includes('application/vnd.amazon.eventstream') ||
+    normalizedUrl.includes('streamgeneratecontent') ||
+    normalizedUrl.includes('alt=sse') ||
+    normalizedUrl.includes('/converse-stream') ||
+    normalizedUrl.includes('/invoke-with-response-stream')
+  )
+}
+
+function getNativeResponseContentType(url: string, headers: Headers): string {
+  const normalizedUrl = url.toLowerCase()
+  if (
+    normalizedUrl.includes('/converse-stream') ||
+    normalizedUrl.includes('/invoke-with-response-stream') ||
+    headers.get('accept')?.toLowerCase().includes('application/vnd.amazon.eventstream')
+  ) {
+    return 'application/vnd.amazon.eventstream'
+  }
+  return 'text/event-stream'
+}
+
 export function cancelReadableStreamOnAbort(stream: ReadableStream<Uint8Array>) {
   try {
     void stream.cancel('aborted').catch((error: unknown) => {
@@ -44,7 +80,7 @@ export async function handleMobileRequest(
   headers.forEach((value, key) => {
     headerObj[key] = value
   })
-  const isStreaming = body && typeof body === 'string' && JSON.parse(body).stream === true
+  const isStreaming = isNativeStreamingRequest(url, headers, body)
 
   if (isStreaming) {
     try {
@@ -113,7 +149,7 @@ export async function handleMobileRequest(
       return new Response(stream, {
         status: 200,
         headers: {
-          'Content-Type': 'text/event-stream',
+          'Content-Type': getNativeResponseContentType(url, headers),
           'Cache-Control': 'no-cache',
         },
       })

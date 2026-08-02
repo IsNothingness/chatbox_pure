@@ -49,7 +49,7 @@ export default class Claude extends AbstractAISDKModel {
   }
 
   private createFetch(): typeof globalThis.fetch | undefined {
-    const baseFetch = this.options.customFetch || globalThis.fetch.bind(globalThis)
+    const baseFetch = this.options.customFetch || this.getPlatformFetch()
     return (input, init) => {
       if (typeof init?.body !== 'string') {
         return baseFetch(input, init)

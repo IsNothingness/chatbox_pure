@@ -20,14 +20,14 @@ import java.util.Map;
  */
 final class BackgroundStreamStore extends SQLiteOpenHelper {
     private static final String DATABASE_NAME = "background_streams.db";
-    private static final int DATABASE_VERSION = 1;
+    private static final int DATABASE_VERSION = 2;
 
     static final class StoredChunk {
         final long sequence;
-        final String payload;
+        final byte[] payload;
         final int byteCount;
 
-        StoredChunk(long sequence, String payload, int byteCount) {
+        StoredChunk(long sequence, byte[] payload, int byteCount) {
             this.sequence = sequence;
             this.payload = payload;
             this.byteCount = byteCount;
@@ -105,7 +105,7 @@ final class BackgroundStreamStore extends SQLiteOpenHelper {
             "CREATE TABLE stream_chunks (" +
                 "task_id TEXT NOT NULL," +
                 "sequence INTEGER NOT NULL," +
-                "payload TEXT NOT NULL," +
+                "payload BLOB NOT NULL," +
                 "byte_count INTEGER NOT NULL," +
                 "PRIMARY KEY(task_id, sequence)," +
                 "FOREIGN KEY(task_id) REFERENCES stream_tasks(id) ON DELETE CASCADE" +
@@ -118,7 +118,16 @@ final class BackgroundStreamStore extends SQLiteOpenHelper {
 
     @Override
     public void onUpgrade(SQLiteDatabase database, int oldVersion, int newVersion) {
-        // Version 1 is the initial schema.
+        if (oldVersion < 2) {
+            // Version 1 stored reconstructed SSE text. Version 2 stores untouched response
+            // bytes so SSE, NDJSON and binary event-stream protocols can share the transport.
+            // Background tasks are short-lived and never contain request credentials, so
+            // discarding an in-flight v1 replay buffer is safer than attempting a mixed-format
+            // migration.
+            database.execSQL("DROP TABLE IF EXISTS stream_chunks");
+            database.execSQL("DROP TABLE IF EXISTS stream_tasks");
+            onCreate(database);
+        }
     }
 
     void writeTask(StoredTask task, List<StoredChunk> newChunks) {
@@ -220,7 +229,7 @@ final class BackgroundStreamStore extends SQLiteOpenHelper {
                 task.chunks.add(
                     new StoredChunk(
                         cursor.getLong(cursor.getColumnIndexOrThrow("sequence")),
-                        cursor.getString(cursor.getColumnIndexOrThrow("payload")),
+                        cursor.getBlob(cursor.getColumnIndexOrThrow("payload")),
                         cursor.getInt(cursor.getColumnIndexOrThrow("byte_count"))
                     )
                 );

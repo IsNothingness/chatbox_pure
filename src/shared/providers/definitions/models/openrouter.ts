@@ -46,7 +46,7 @@ export default class OpenRouter extends AbstractAISDKModel {
         'HTTP-Referer': 'https://chatboxai.app',
         'X-Title': 'Chatbox AI',
       },
-      fetch: this.options.customFetch,
+      fetch: this.options.customFetch || this.getPlatformFetch(),
     })
   }
 

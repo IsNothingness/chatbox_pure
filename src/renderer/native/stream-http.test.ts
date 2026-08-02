@@ -158,6 +158,35 @@ describe('native pull-backed stream', () => {
     ])
   })
 
+  test('replays base64 native chunks without changing binary protocol bytes', async () => {
+    mocks.attachStream.mockResolvedValue({
+      id: 'stream-1',
+      state: 'ended',
+      lastSequence: 0,
+      createdAt: 1,
+      chunks: [{ sequence: 0, chunkBase64: '/wAKgA==' }],
+      hasMore: false,
+    })
+
+    const stream = createNativeReadableStream(
+      { url: 'https://example.com/converse-stream', method: 'POST', headers: {}, body: '{}' },
+      {
+        keepAlive: true,
+        notificationTitle: 'Generating',
+        notificationBody: 'Please wait',
+        resumeStreamId: 'stream-1',
+      }
+    )
+    const reader = stream.getReader()
+
+    setRendererActive(true)
+    const result = await reader.read()
+    await expect(reader.read()).resolves.toEqual({ value: undefined, done: true })
+
+    expect(result.done).toBe(false)
+    expect([...(result.value ?? new Uint8Array())]).toEqual([255, 0, 10, 128])
+  })
+
   test('stops polling in the background and immediately resumes from the last cursor', async () => {
     mocks.attachStream
       .mockResolvedValueOnce({

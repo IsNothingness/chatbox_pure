@@ -45,6 +45,7 @@ import type {
   ModelStatus,
   ModelStreamPart,
 } from './types'
+import { createFetchWithProxy } from './utils/fetch-proxy'
 
 const RETRY_CONFIG = {
   MAX_ATTEMPTS: 5,
@@ -167,6 +168,15 @@ export default abstract class AbstractAISDKModel implements ModelInterface {
     protected dependencies: ModelDependencies
   ) {
     this.modelId = options.model.modelId
+  }
+
+  /**
+   * Routes provider traffic through the platform request adapter. On Android this
+   * is the native foreground transport; desktop/web retain their existing fetch
+   * and proxy behavior.
+   */
+  protected getPlatformFetch(useProxy?: boolean): typeof globalThis.fetch {
+    return createFetchWithProxy(useProxy, this.dependencies)
   }
 
   protected abstract getProvider(

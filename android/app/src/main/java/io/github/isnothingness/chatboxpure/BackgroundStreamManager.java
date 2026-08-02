@@ -3,8 +3,6 @@ package io.github.isnothingness.chatboxpure;
 import android.content.Context;
 import android.util.Log;
 
-import com.chatbox.plugins.streamhttp.SSEParser;
-
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
@@ -61,9 +59,9 @@ final class BackgroundStreamManager {
 
     static final class ChunkRecord {
         final long sequence;
-        final String chunk;
+        final byte[] chunk;
 
-        ChunkRecord(long sequence, String chunk) {
+        ChunkRecord(long sequence, byte[] chunk) {
             this.sequence = sequence;
             this.chunk = chunk;
         }
@@ -372,7 +370,7 @@ final class BackgroundStreamManager {
                 );
             }
             if (inputStream != null) {
-                readEvents(task, inputStream);
+                readResponseBytes(task, inputStream);
             }
             if (isRunning(task)) {
                 endTask(task);
@@ -401,29 +399,27 @@ final class BackgroundStreamManager {
         return body.toString().trim();
     }
 
-    private void readEvents(StreamTask task, InputStream inputStream) throws IOException {
-        try (BufferedReader reader = new BufferedReader(
-            new InputStreamReader(inputStream, StandardCharsets.UTF_8)
-        )) {
-            SSEParser parser = new SSEParser();
-            String line;
-            while ((line = reader.readLine()) != null) {
+    private void readResponseBytes(StreamTask task, InputStream inputStream) throws IOException {
+        try (InputStream stream = inputStream) {
+            byte[] buffer = new byte[16 * 1024];
+            int count;
+            while ((count = stream.read(buffer)) != -1) {
                 if (!isRunning(task)) {
                     break;
                 }
-                appendChunk(task, parser.processLine(line));
+                byte[] chunk = new byte[count];
+                System.arraycopy(buffer, 0, chunk, 0, count);
+                appendChunk(task, chunk);
             }
-            appendChunk(task, parser.processLine(""));
-            appendChunk(task, parser.flush());
         }
     }
 
-    private void appendChunk(StreamTask task, String chunk) throws IOException {
-        if (chunk == null || chunk.isEmpty()) {
+    private void appendChunk(StreamTask task, byte[] chunk) throws IOException {
+        if (chunk == null || chunk.length == 0) {
             return;
         }
         long sequence;
-        int chunkBytes = chunk.getBytes(StandardCharsets.UTF_8).length;
+        int chunkBytes = chunk.length;
         synchronized (task.lock) {
             if (!STATE_RUNNING.equals(task.state)) {
                 return;
@@ -500,7 +496,7 @@ final class BackgroundStreamManager {
                 int index = low;
                 while (index < task.chunks.size() && selected.size() < maxChunks) {
                     ChunkRecord record = task.chunks.get(index);
-                    int recordBytes = record.chunk.getBytes(StandardCharsets.UTF_8).length;
+                    int recordBytes = record.chunk.length;
                     if (!selected.isEmpty() && selectedBytes + recordBytes > maxBytes) {
                         break;
                     }
@@ -607,7 +603,7 @@ final class BackgroundStreamManager {
                     new BackgroundStreamStore.StoredChunk(
                         record.sequence,
                         record.chunk,
-                        record.chunk.getBytes(StandardCharsets.UTF_8).length
+                        record.chunk.length
                     )
                 );
             }

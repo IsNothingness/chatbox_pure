@@ -45,6 +45,7 @@ export default class CustomGemini extends AbstractAISDKModel {
     return createGoogleGenerativeAI({
       apiKey: this.options.apiKey,
       baseURL: normalizeGeminiHost(this.options.apiHost).apiHost,
+      fetch: this.getPlatformFetch(),
     })
   }
 

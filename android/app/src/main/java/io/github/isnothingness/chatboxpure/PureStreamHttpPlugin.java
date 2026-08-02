@@ -2,6 +2,7 @@ package io.github.isnothingness.chatboxpure;
 
 import android.Manifest;
 import android.os.Build;
+import android.util.Base64;
 import android.util.Log;
 
 import com.getcapacitor.JSArray;
@@ -212,7 +213,7 @@ public class PureStreamHttpPlugin extends Plugin {
             for (BackgroundStreamManager.ChunkRecord record : snapshot.chunks) {
                 JSObject chunk = new JSObject();
                 chunk.put("sequence", record.sequence);
-                chunk.put("chunk", record.chunk);
+                chunk.put("chunkBase64", Base64.encodeToString(record.chunk, Base64.NO_WRAP));
                 chunks.put(chunk);
             }
             result.put("chunks", chunks);

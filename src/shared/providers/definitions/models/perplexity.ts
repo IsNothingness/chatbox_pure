@@ -26,6 +26,7 @@ export default class Perplexity extends AbstractAISDKModel {
   protected getProvider() {
     return createPerplexity({
       apiKey: this.options.perplexityApiKey,
+      fetch: this.getPlatformFetch(),
     })
   }
 

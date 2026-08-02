@@ -37,6 +37,7 @@ export default class CustomClaude extends AbstractAISDKModel {
     return createAnthropic({
       baseURL: this.options.apiHost,
       apiKey: this.options.apiKey,
+      fetch: this.getPlatformFetch(),
       headers: {
         'anthropic-dangerous-direct-browser-access': 'true',
       },

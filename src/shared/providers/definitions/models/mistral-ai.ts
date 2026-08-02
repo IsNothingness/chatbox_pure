@@ -46,6 +46,7 @@ export default class MistralAI extends AbstractAISDKModel {
     const mistral = createMistral({
       apiKey: this.options.apiKey,
       baseURL: 'https://api.mistral.ai/v1',
+      fetch: this.getPlatformFetch(),
     })
 
     return {

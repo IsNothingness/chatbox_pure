@@ -3,6 +3,17 @@ import { beforeEach, describe, expect, test, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   cancelNativeStream: vi.fn(() => Promise.resolve()),
   consumeContext: vi.fn(),
+  createNativeStream: vi.fn(
+    (
+      _options: unknown,
+      background: {
+        onStreamAttached?: (id: string) => void
+      }
+    ) => {
+      background.onStreamAttached?.('native-stream-1')
+      return new ReadableStream<Uint8Array>()
+    }
+  ),
   recordAttached: vi.fn(),
   requestPermission: vi.fn(() => Promise.resolve(true)),
 }))
@@ -20,17 +31,7 @@ vi.mock('@/native/background-generation-context', () => ({
 vi.mock('@/native/stream-http', () => ({
   cancelNativeStream: mocks.cancelNativeStream,
   requestGenerationNotificationPermission: mocks.requestPermission,
-  createNativeReadableStream: vi.fn(
-    (
-      _options: unknown,
-      background: {
-        onStreamAttached?: (id: string) => void
-      }
-    ) => {
-      background.onStreamAttached?.('native-stream-1')
-      return new ReadableStream<Uint8Array>()
-    }
-  ),
+  createNativeReadableStream: mocks.createNativeStream,
 }))
 vi.mock('@/stores/settingsStore', () => ({
   settingsStore: {
@@ -68,5 +69,22 @@ describe('mobile background request cancellation', () => {
     controller.abort()
     await vi.waitFor(() => expect(mocks.cancelNativeStream).toHaveBeenCalledWith('native-stream-1'))
     expect(mocks.recordAttached).toHaveBeenCalledWith(controller.signal, 'native-stream-1')
+  })
+
+  test.each([
+    ['Gemini SSE URL', 'https://example.com/v1beta/models/gemini:streamGenerateContent?alt=sse'],
+    ['Bedrock binary event stream', 'https://bedrock.example.com/model/test/converse-stream'],
+  ])('routes %s through the native stream without a stream body flag', async (_name, url) => {
+    const response = await handleMobileRequest(
+      url,
+      'POST',
+      new Headers({ 'Content-Type': 'application/json' }),
+      JSON.stringify({ contents: [] })
+    )
+
+    expect(mocks.createNativeStream).toHaveBeenCalledOnce()
+    expect(response.headers.get('Content-Type')).toBe(
+      url.includes('converse-stream') ? 'application/vnd.amazon.eventstream' : 'text/event-stream'
+    )
   })
 })

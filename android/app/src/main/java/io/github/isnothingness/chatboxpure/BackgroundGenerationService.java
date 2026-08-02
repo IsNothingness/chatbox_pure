@@ -154,6 +154,7 @@ public class BackgroundGenerationService extends Service {
             .setSilent(true)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .build();
     }
 

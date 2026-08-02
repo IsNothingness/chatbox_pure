@@ -31,6 +31,7 @@ export default class DeepSeek extends AbstractAISDKModel {
       name: 'deepseek',
       apiKey: this.options.apiKey,
       baseURL: 'https://api.deepseek.com',
+      fetch: this.getPlatformFetch(),
     })
   }
 

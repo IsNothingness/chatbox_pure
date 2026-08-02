@@ -62,7 +62,10 @@ async function doRequest(url: string, options: RequestOptions): Promise<Response
   }
 
   const makeRequest = async () => {
-    if (platform.type === 'mobile' && useProxy) {
+    // Every mobile request must use the native adapter. `useProxy` controls routing
+    // policy; it must not decide whether a model is allowed to use the Android
+    // foreground transport.
+    if (platform.type === 'mobile') {
       return handleMobileRequest(requestUrl, method, headers, body, signal)
     }
 

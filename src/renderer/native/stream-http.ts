@@ -21,7 +21,10 @@ export interface NativeStreamTask {
 
 interface NativeStreamChunk {
   sequence: number
-  chunk: string
+  /** Version 2 native transport: untouched response bytes encoded for the Capacitor JSON bridge. */
+  chunkBase64?: string
+  /** Version 1 compatibility for tests and already-buffered text streams. */
+  chunk?: string
 }
 
 interface NativeStreamSnapshot extends NativeStreamTask {
@@ -161,7 +164,7 @@ function createPureAndroidReadableStream(
   let appActive = true
   let documentVisible = document.visibilityState !== 'hidden'
   const textEncoder = new TextEncoder()
-  const pendingChunks = new Map<number, string>()
+  const pendingChunks = new Map<number, Uint8Array>()
   let expectedSequence = 0
   let activeController: ReadableStreamDefaultController<Uint8Array> | null = null
 
@@ -189,18 +192,32 @@ function createPureAndroidReadableStream(
 
   const flush = (controller: ReadableStreamDefaultController<Uint8Array>) => {
     while (pendingChunks.has(expectedSequence)) {
-      const text = pendingChunks.get(expectedSequence) || ''
+      const bytes = pendingChunks.get(expectedSequence)
       pendingChunks.delete(expectedSequence)
       expectedSequence += 1
-      if (text) {
-        controller.enqueue(textEncoder.encode(text))
+      if (bytes?.byteLength) {
+        controller.enqueue(bytes)
       }
     }
   }
 
-  const acceptChunk = (controller: ReadableStreamDefaultController<Uint8Array>, sequence: number, chunk: string) => {
+  const decodeBase64 = (value: string): Uint8Array => {
+    const binary = globalThis.atob(value)
+    const bytes = new Uint8Array(binary.length)
+    for (let index = 0; index < binary.length; index += 1) {
+      bytes[index] = binary.charCodeAt(index)
+    }
+    return bytes
+  }
+
+  const acceptChunk = (
+    controller: ReadableStreamDefaultController<Uint8Array>,
+    sequence: number,
+    chunk: NativeStreamChunk
+  ) => {
     if (sequence < expectedSequence || pendingChunks.has(sequence)) return
-    pendingChunks.set(sequence, chunk)
+    const bytes = chunk.chunkBase64 ? decodeBase64(chunk.chunkBase64) : textEncoder.encode(chunk.chunk || '')
+    pendingChunks.set(sequence, bytes)
     flush(controller)
   }
 
@@ -240,7 +257,7 @@ function createPureAndroidReadableStream(
       receivedChunks = snapshot.chunks.length > 0
       hasMoreBacklog = snapshot.hasMore
       for (const record of snapshot.chunks) {
-        acceptChunk(controller, record.sequence, record.chunk)
+        acceptChunk(controller, record.sequence, record)
       }
 
       const hasAllTerminalChunks = expectedSequence > snapshot.lastSequence
