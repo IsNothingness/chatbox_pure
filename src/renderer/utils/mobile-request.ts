@@ -1,5 +1,6 @@
 import { CapacitorHttp } from '@capacitor/core'
 import i18n from '@/i18n'
+import { consumeNativeGenerationContext, recordAttachedNativeStream } from '@/native/background-generation-context'
 import { createNativeReadableStream } from '@/native/stream-http'
 import { settingsStore } from '@/stores/settingsStore'
 import { ApiError } from '../../shared/models/errors'
@@ -50,6 +51,7 @@ export async function handleMobileRequest(
       }
 
       const settings = settingsStore.getState().getSettings()
+      const generationContext = consumeNativeGenerationContext(signal)
       const stream = createNativeReadableStream(
         {
           url,
@@ -61,6 +63,18 @@ export async function handleMobileRequest(
           keepAlive: settings.keepGeneratingInBackground,
           notificationTitle: i18n.t('ChatBox Pure is generating a reply'),
           notificationBody: i18n.t('You can leave the app or turn off the screen.'),
+          notifyWhenComplete: settings.notifyWhenGenerationCompletes,
+          completionTitle: i18n.t('Reply generated') || 'Reply generated',
+          completionBody:
+            i18n.t('Tap to return to ChatBox Pure and view the reply.') ||
+            'Tap to return to ChatBox Pure and view the reply.',
+          clientRequestId: generationContext?.clientRequestId,
+          sessionId: generationContext?.sessionId,
+          messageId: generationContext?.messageId,
+          resumeStreamId: generationContext?.resumeStreamId,
+          onStreamAttached: (streamId) => {
+            recordAttachedNativeStream(signal, streamId)
+          },
         }
       )
 

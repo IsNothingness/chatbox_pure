@@ -17,10 +17,11 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Keeps the application process important while a user-initiated model stream is active.
+ * Owns the foreground lifecycle for user-initiated model streams.
  *
- * The HTTP connection remains owned by PureStreamHttpPlugin. This service supplies the
- * Android foreground-service lifecycle and the required user-visible notification.
+ * Stream connections and replay buffers live in the process-scoped
+ * {@link BackgroundStreamManager}. Starting work from this service keeps that owner independent
+ * from the Activity/WebView and gives Android a user-visible reason to retain the process.
  */
 public class BackgroundGenerationService extends Service {
     private static final String ACTION_START = "io.github.isnothingness.chatboxpure.GENERATION_START";
@@ -94,6 +95,7 @@ public class BackgroundGenerationService extends Service {
             activeTitle = valueOrDefault(intent.getStringExtra(EXTRA_TITLE), activeTitle);
             activeBody = valueOrDefault(intent.getStringExtra(EXTRA_BODY), activeBody);
             startForeground(ACTIVE_NOTIFICATION_ID, buildActiveNotification());
+            BackgroundStreamManager.getInstance(this).startTask(streamId);
         } else if (ACTION_STOP.equals(intent.getAction()) && streamId != null) {
             activeStreams.remove(streamId);
             if (activeStreams.isEmpty()) {

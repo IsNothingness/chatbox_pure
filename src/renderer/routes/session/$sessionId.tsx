@@ -13,8 +13,8 @@ import InputBox, { type InputBoxPayload } from '@/components/InputBox/InputBox'
 import Header from '@/components/layout/Header'
 import Page from '@/components/layout/Page'
 import ThreadHistoryDrawer from '@/components/session/ThreadHistoryDrawer'
-import { useProviders } from '@/hooks/useProviders'
 import { useChatSidebarSwipe } from '@/hooks/useChatSidebarSwipe'
+import { useProviders } from '@/hooks/useProviders'
 import { useIsSmallScreen } from '@/hooks/useScreenChange'
 import useVersion from '@/hooks/useVersion'
 import { defaultSessionsForCN, defaultSessionsForEN } from '@/packages/initial_data'
@@ -167,8 +167,6 @@ function RouteComponent() {
 
   const onSubmit = useCallback(
     async ({ constructedMessage, needGenerating = true, onUserMessageReady }: InputBoxPayload) => {
-      messageListRef.current?.setIsNewMessage(true)
-
       if (!currentSession) {
         return
       }

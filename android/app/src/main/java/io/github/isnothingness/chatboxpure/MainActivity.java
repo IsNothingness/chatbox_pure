@@ -18,6 +18,11 @@ public class MainActivity extends BridgeActivity {
     };
     private boolean darkStatusBarIcons;
     private int statusBarRefreshGeneration;
+    private static volatile boolean appVisible;
+
+    public static boolean isAppVisible() {
+        return appVisible;
+    }
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -48,6 +53,18 @@ public class MainActivity extends BridgeActivity {
     public void onResume() {
         super.onResume();
         refreshStatusBarIconStyle();
+    }
+
+    @Override
+    public void onStart() {
+        super.onStart();
+        appVisible = true;
+    }
+
+    @Override
+    public void onStop() {
+        appVisible = false;
+        super.onStop();
     }
 
     @Override

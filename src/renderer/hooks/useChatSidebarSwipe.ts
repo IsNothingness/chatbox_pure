@@ -73,7 +73,7 @@ function hasHorizontalScrollTarget(target: Element): boolean {
   return false
 }
 
-function shouldIgnoreTarget(target: EventTarget | null): boolean {
+export function shouldIgnoreSidebarSwipeTarget(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return true
   if (
     target.closest(
@@ -107,7 +107,7 @@ export function useChatSidebarSwipe() {
     let activeTouch: ActiveTouch | null = null
 
     const handleTouchStart = (event: TouchEvent) => {
-      if (event.touches.length !== 1 || shouldIgnoreTarget(event.target)) {
+      if (event.touches.length !== 1 || shouldIgnoreSidebarSwipeTarget(event.target)) {
         activeTouch = null
         return
       }

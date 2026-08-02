@@ -48,3 +48,21 @@ export function sortSessionRecords(sessions: SessionMetaRecord[]): SessionMetaRe
       return b.sortOrder - a.sortOrder
     })
 }
+
+export function getSortOrderImmediatelyAbove(
+  sessions: Array<Pick<SessionMetaRecord, 'id' | 'starred' | 'sortOrder'>>,
+  targetId: string,
+  edgeSpacing = 1000
+): number | null {
+  const targetIndex = sessions.findIndex((session) => session.id === targetId)
+  const target = sessions[targetIndex]
+  if (!target) return null
+
+  for (let index = targetIndex - 1; index >= 0; index -= 1) {
+    const candidate = sessions[index]
+    if (areSessionsInSamePinGroup(candidate, target)) {
+      return (candidate.sortOrder + target.sortOrder) / 2
+    }
+  }
+  return target.sortOrder + edgeSpacing
+}

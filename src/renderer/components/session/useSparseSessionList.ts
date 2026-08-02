@@ -1,7 +1,7 @@
 import type { SessionMetaPage, SessionMetaRecord } from '@shared/types'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ListRange } from 'react-virtuoso'
-import { listSessionsMetaPage, useSessionListRevision } from '@/stores/chatStore'
+import { getVisibleSessionMetaIndex, listSessionsMetaPage, useSessionListRevision } from '@/stores/chatStore'
 import {
   COLD_ZONE_DISTANCE,
   displayRangeToSessionRange,
@@ -10,6 +10,7 @@ import {
   getPrefetchRange,
   getSessionListDisplayCount,
   getSessionListSlot,
+  moveItemInPagedCache,
   type ScrollDirection,
   SESSION_PAGE_SIZE,
   type SessionRange,
@@ -56,6 +57,8 @@ export interface SparseSessionList {
     | { type: 'session'; sessionIndex: number; session?: SessionMetaRecord }
     | null
   onRangeChanged: (range: ListRange) => void
+  ensureSessionLoaded: (sessionId: string) => Promise<number | null>
+  moveSession: (oldIndex: number, newIndex: number) => boolean
 }
 
 export function useSparseSessionList(options: { pauseEviction: boolean }): SparseSessionList {
@@ -76,6 +79,7 @@ export function useSparseSessionList(options: { pauseEviction: boolean }): Spars
   const prefetchScheduleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const prefetchGenerationRef = useRef(0)
   const cachePublishFrameRef = useRef<number | null>(null)
+  const hasInitializedRef = useRef(false)
   const [cacheVersion, setCacheVersion] = useState(0)
   const [total, setTotal] = useState(0)
   const [pinnedCount, setPinnedCount] = useState(0)
@@ -89,10 +93,28 @@ export function useSparseSessionList(options: { pauseEviction: boolean }): Spars
     })
   }, [])
 
+  const publishCacheChangeNow = useCallback(() => {
+    if (cachePublishFrameRef.current !== null) {
+      cancelAnimationFrame(cachePublishFrameRef.current)
+      cachePublishFrameRef.current = null
+    }
+    setCacheVersion((version) => version + 1)
+  }, [])
+
   const requestPage = useCallback(
-    async (pageStart: number, kind: PageLoadKind): Promise<SessionMetaPage | null> => {
+    async (pageStart: number, kind: PageLoadKind, force = false): Promise<SessionMetaPage | null> => {
+      const inflight = inflightRef.current.get(pageStart)
+      if (inflight) {
+        const page = await inflight
+        if (page && kind === 'visible') {
+          const usage = pageUsageRef.current.get(pageStart)
+          if (usage) usage.lastVisibleAt = Date.now()
+        }
+        return page
+      }
+
       const existing = pagesRef.current.get(pageStart)
-      if (existing) {
+      if (existing && !force) {
         if (kind === 'visible') {
           const usage = pageUsageRef.current.get(pageStart)
           if (usage) usage.lastVisibleAt = Date.now()
@@ -102,16 +124,6 @@ export function useSparseSessionList(options: { pauseEviction: boolean }): Spars
           total: totalRef.current,
           nextCursor: pageStart + existing.length < totalRef.current ? pageStart + existing.length : null,
         }
-      }
-
-      const inflight = inflightRef.current.get(pageStart)
-      if (inflight) {
-        const page = await inflight
-        if (page && kind === 'visible') {
-          const usage = pageUsageRef.current.get(pageStart)
-          if (usage) usage.lastVisibleAt = Date.now()
-        }
-        return page
       }
 
       const generation = generationRef.current
@@ -146,31 +158,39 @@ export function useSparseSessionList(options: { pauseEviction: boolean }): Spars
 
   useEffect(() => {
     void sessionListRevision
+    const isBackgroundRefresh = hasInitializedRef.current
+    const cachedPageStarts = [...pagesRef.current.keys()]
     generationRef.current += 1
-    pagesRef.current.clear()
-    pageUsageRef.current.clear()
     inflightRef.current.clear()
     prefetchGenerationRef.current += 1
     if (prefetchScheduleTimerRef.current) {
       clearTimeout(prefetchScheduleTimerRef.current)
       prefetchScheduleTimerRef.current = null
     }
-    totalRef.current = 0
-    visibleRangeRef.current = { start: 0, end: 0 }
-    motionRef.current = {
-      lastCenter: 0,
-      lastAt: 0,
-      direction: 0,
-      speedItemsPerSecond: 0,
+    if (!isBackgroundRefresh) {
+      pagesRef.current.clear()
+      pageUsageRef.current.clear()
+      totalRef.current = 0
+      visibleRangeRef.current = { start: 0, end: 0 }
+      motionRef.current = {
+        lastCenter: 0,
+        lastAt: 0,
+        direction: 0,
+        speedItemsPerSecond: 0,
+      }
+      setTotal(0)
+      setPinnedCount(0)
+      setIsInitializing(true)
     }
-    setTotal(0)
-    setPinnedCount(0)
-    setIsInitializing(true)
     publishCacheChange()
 
     const generation = generationRef.current
     const initialize = async () => {
-      const firstPage = await requestPage(0, 'visible')
+      const refreshPageStarts = isBackgroundRefresh ? [...new Set([0, ...cachedPageStarts])] : [0]
+      const refreshRequests = refreshPageStarts.map((pageStart) =>
+        requestPage(pageStart, pageStart === 0 ? 'visible' : 'prefetch', isBackgroundRefresh)
+      )
+      const firstPage = await refreshRequests[0]
       if (!firstPage || generation !== generationRef.current) return
 
       if (firstPage.total <= FULL_LOAD_THRESHOLD) {
@@ -179,6 +199,8 @@ export function useSparseSessionList(options: { pauseEviction: boolean }): Spars
           SESSION_PAGE_SIZE
         )
         await Promise.all(allPageStarts.slice(1).map((pageStart) => requestPage(pageStart, 'prefetch')))
+      } else if (isBackgroundRefresh) {
+        await Promise.all(refreshRequests.slice(1))
       }
       if (generation !== generationRef.current) return
 
@@ -197,6 +219,7 @@ export function useSparseSessionList(options: { pauseEviction: boolean }): Spars
       }
       if (generation !== generationRef.current) return
       setPinnedCount(Math.min(discoveredPinnedCount, firstPage.total))
+      hasInitializedRef.current = true
       setIsInitializing(false)
     }
 
@@ -371,6 +394,33 @@ export function useSparseSessionList(options: { pauseEviction: boolean }): Spars
     [cacheVersion, pinnedCount, total]
   )
 
+  const moveSession = useCallback(
+    (oldIndex: number, newIndex: number) => {
+      if (!moveItemInPagedCache(pagesRef.current, oldIndex, newIndex)) return false
+      publishCacheChangeNow()
+      return true
+    },
+    [publishCacheChangeNow]
+  )
+
+  const ensureSessionLoaded = useCallback(
+    async (sessionId: string): Promise<number | null> => {
+      for (const [pageStart, page] of pagesRef.current) {
+        const indexInPage = page.findIndex((session) => session.id === sessionId)
+        if (indexInPage >= 0) return pageStart + indexInPage
+      }
+
+      const sessionIndex = await getVisibleSessionMetaIndex(sessionId)
+      if (sessionIndex === null || sessionIndex < 0 || sessionIndex >= totalRef.current) return null
+      const pageStart = Math.floor(sessionIndex / SESSION_PAGE_SIZE) * SESSION_PAGE_SIZE
+      const page = await requestPage(pageStart, 'visible')
+      if (!page) return null
+      publishCacheChangeNow()
+      return sessionIndex
+    },
+    [publishCacheChangeNow, requestPage]
+  )
+
   return {
     total,
     displayCount: getSessionListDisplayCount(total, pinnedCount),
@@ -380,5 +430,7 @@ export function useSparseSessionList(options: { pauseEviction: boolean }): Spars
     sessionIndexById,
     getSlot,
     onRangeChanged,
+    ensureSessionLoaded,
+    moveSession,
   }
 }

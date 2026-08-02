@@ -19,6 +19,7 @@ export interface SessionMetaStorage extends SessionMetaRepositoryPort {
   getArchived(): Promise<SessionMetaRecord[]>
   getArchivedPage(cursor: number, limit?: number): Promise<SessionMetaPage>
   getPage(cursor: number, limit?: number): Promise<SessionMetaPage>
+  getVisibleIndexById(id: string): Promise<number | null>
   getTotal(): Promise<number>
   getAllTotal(): Promise<number>
   getArchivedTotal(): Promise<number>
@@ -229,6 +230,20 @@ export class IndexedDBSessionMetaStorage implements SessionMetaStorage {
     const [items, total] = await Promise.all([this.getVisibleRecordsPage(cursor, limit), this.getTotal()])
     const nextCursor = cursor + items.length < total ? cursor + items.length : null
     return { items, nextCursor, total }
+  }
+
+  async getVisibleIndexById(id: string): Promise<number | null> {
+    await this.initialize()
+    const target = await this.getById(id)
+    if (!target || target.hidden) return null
+
+    return await this.countRecords((record) => {
+      if (record.hidden) return false
+      if (Boolean(record.starred) !== Boolean(target.starred)) {
+        return Boolean(record.starred)
+      }
+      return record.sortOrder > target.sortOrder
+    })
   }
 
   async getTotal(): Promise<number> {

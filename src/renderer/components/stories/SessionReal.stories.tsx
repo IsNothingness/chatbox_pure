@@ -6,7 +6,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createMemoryHistory, createRootRoute, createRoute, createRouter, RouterProvider } from '@tanstack/react-router'
 import { getDefaultStore } from 'jotai'
-import { createContext, type MutableRefObject, type ReactNode, useContext, useEffect, useRef } from 'react'
+import { createContext, type MutableRefObject, type ReactNode, useContext, useEffect, useRef, useState } from 'react'
 import { currentSessionIdAtom, showThreadHistoryDrawerAtom } from '@/stores/atoms'
 import { QueryKeys } from '@/stores/chatStore'
 import SessionItem from '../session/SessionItem'
@@ -184,6 +184,7 @@ function ThreadHistoryDrawerFixture() {
 
 function SessionListFixture() {
   const viewportRef = useRef<HTMLDivElement | null>(null)
+  const [isReordering, setIsReordering] = useState(false)
   const seededRef = useRef(false)
   if (!seededRef.current) {
     seededRef.current = true
@@ -212,7 +213,11 @@ function SessionListFixture() {
         maw={380}
         style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
       >
-        <SessionList sessionListViewportRef={viewportRef as MutableRefObject<HTMLDivElement | null>} />
+        <SessionList
+          sessionListViewportRef={viewportRef as MutableRefObject<HTMLDivElement | null>}
+          isReordering={isReordering}
+          onReorderingChange={setIsReordering}
+        />
       </Paper>
     </Stack>
   )

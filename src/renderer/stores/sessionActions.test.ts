@@ -568,6 +568,7 @@ describe('fork actions', () => {
     await sessionActions.moveThreadToConversations(session.id, thread.id)
 
     expect(createSessionMock).toHaveBeenCalledTimes(1)
+    expect(createSessionMock).toHaveBeenCalledWith(expect.anything(), session.id)
     const newSession = createSessionMock.mock.calls[0][0] as Omit<Session, 'id'>
     expect(newSession.name).toBe(thread.name)
     expect(newSession.threads).toEqual([])
@@ -724,6 +725,7 @@ describe('fork actions', () => {
     })
 
     expect(createSessionMock).toHaveBeenCalledTimes(1)
+    expect(createSessionMock).toHaveBeenCalledWith(expect.anything(), session.id)
     const newSession = createSessionMock.mock.calls[0][0] as Omit<Session, 'id'>
     expect(newSession.messageForksHash).toBeDefined()
     expect(Object.keys(newSession.messageForksHash ?? {})).toHaveLength(2)

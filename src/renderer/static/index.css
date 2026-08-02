@@ -221,6 +221,132 @@ html[data-theme="dark"] .App::before {
   min-height: 0;
 }
 
+.mobile-reorder-mode-card {
+  background: color-mix(in srgb, var(--chatbox-background-primary) 72%, transparent);
+  border: 1px solid color-mix(in srgb, var(--chatbox-border-primary) 76%, transparent);
+  border-radius: 14px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
+  -webkit-backdrop-filter: blur(18px) saturate(1.12);
+  backdrop-filter: blur(18px) saturate(1.12);
+}
+
+.mobile-session-reorder-pill {
+  border: 1px solid rgba(127, 127, 127, 0.08);
+  border-radius: 9999px !important;
+  background: rgba(127, 127, 127, 0.065);
+  transition:
+    background-color 150ms ease,
+    border-color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+html[data-theme="light"] .mobile-session-reorder-pill {
+  border-color: rgba(30, 36, 44, 0.055);
+  background: rgba(30, 36, 44, 0.042);
+}
+
+.mobile-session-drag-overlay {
+  width: 100%;
+  opacity: 0.96;
+  transform: scale(0.95);
+  transform-origin: center;
+  will-change: transform;
+}
+
+.mobile-session-manual-overlay {
+  position: fixed;
+  z-index: 1400;
+  height: 48px;
+  will-change: transform;
+}
+
+.mobile-session-placement-layer {
+  position: fixed;
+  z-index: 1401;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 100ms ease-out;
+}
+
+.mobile-session-placement-layer[data-visible="true"] {
+  opacity: 1;
+  transition-duration: 140ms;
+}
+
+.mobile-session-placement-frame {
+  position: absolute;
+  border: 1px solid rgba(34, 199, 232, 0.78);
+  border-radius: 9999px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.11), transparent 48%), rgba(34, 199, 232, 0.075);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    0 0 11px rgba(34, 199, 232, 0.16);
+  pointer-events: none;
+  transform: scale(0.985);
+  transition: transform 100ms ease-out;
+}
+
+.mobile-session-placement-layer[data-visible="true"] .mobile-session-placement-frame {
+  transform: scale(1);
+  transition-duration: 140ms;
+}
+
+html[data-theme="light"] .mobile-session-placement-frame {
+  border-color: rgba(8, 166, 199, 0.68);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.52), transparent 52%), rgba(8, 166, 199, 0.065);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.72),
+    0 0 10px rgba(8, 166, 199, 0.14);
+}
+
+.mobile-session-unpin-prompt {
+  border: 1px solid color-mix(in srgb, var(--chatbox-border-primary) 72%, transparent);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--chatbox-background-primary) 88%, transparent);
+  -webkit-backdrop-filter: blur(18px) saturate(1.1);
+  backdrop-filter: blur(18px) saturate(1.1);
+}
+
+.mobile-session-drag-overlay .mobile-session-reorder-pill {
+  border-color: rgba(127, 127, 127, 0.18);
+  background: color-mix(in srgb, var(--chatbox-background-primary) 82%, transparent);
+  box-shadow:
+    0 14px 28px rgba(0, 0, 0, 0.2),
+    0 3px 9px rgba(0, 0, 0, 0.12);
+}
+
+.mobile-session-reorder-row {
+  height: 100%;
+  transition: transform 165ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.mobile-session-reorder-insertion {
+  position: absolute;
+  right: 18px;
+  left: 18px;
+  z-index: 2;
+  height: 3px;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--chatbox-brand) 72%, transparent);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--chatbox-brand) 24%, transparent);
+  pointer-events: none;
+}
+
+.mobile-session-reorder-insertion[data-edge="top"] {
+  top: -2px;
+}
+
+.mobile-session-reorder-insertion[data-edge="bottom"] {
+  bottom: -2px;
+}
+
+html[data-keyboard-visible="true"],
+html[data-keyboard-visible="true"] body {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
 html[data-theme="light"] .mobile-sidebar-glass {
   background: rgba(255, 255, 255, 0.78);
 }

@@ -2,6 +2,7 @@ import { registerPlugin } from '@capacitor/core'
 import { ActionIcon, Box, Button, Flex, Image, NavLink, Stack, Text, Tooltip } from '@mantine/core'
 import SwipeableDrawer from '@mui/material/SwipeableDrawer'
 import {
+  IconArrowsMoveVertical,
   IconCirclePlus,
   IconCode,
   IconDownload,
@@ -26,7 +27,7 @@ import { navigateToSettings } from './modals/Settings'
 import { trackingEvent } from './packages/event'
 import { getSidebarModalSx } from './sidebar-drawer'
 import icon from './static/icon.png'
-import { useLanguage } from './stores/settingsStore'
+import { settingsStore, useLanguage } from './stores/settingsStore'
 import { useUIStore } from './stores/uiStore'
 import { installUpdate, useUpdateStore } from './stores/updateStore'
 import { CHATBOX_BUILD_PLATFORM, CHATBOX_BUILD_TARGET } from './variables'
@@ -57,12 +58,22 @@ export default function Sidebar() {
   const setOpenSearchDialog = useUIStore((s) => s.setOpenSearchDialog)
 
   const sessionListViewportRef = useRef<HTMLDivElement>(null)
+  const [coldStartCenterSessionId] = useState(() => {
+    if (settingsStore.getState().startupPage !== 'session') return null
+    try {
+      const sessionId = JSON.parse(localStorage.getItem('_currentSessionIdCachedAtom') || '""')
+      return typeof sessionId === 'string' && sessionId ? sessionId : null
+    } catch {
+      return null
+    }
+  })
 
   const sidebarWidth = useSidebarWidth()
 
   const isSmallScreen = useIsSmallScreen()
 
   const [isResizing, setIsResizing] = useState(false)
+  const [isSessionReordering, setIsSessionReordering] = useState(false)
   const [mobileSidebarContentWidth, setMobileSidebarContentWidth] = useState(320)
   const resizeStartX = useRef<number>(0)
   const resizeStartWidth = useRef<number>(0)
@@ -214,50 +225,69 @@ export default function Sidebar() {
           justify="space-between"
           gap="xs"
           px="md"
-          py="sm"
+          h={52}
           className="border-0 border-b border-solid border-chatbox-border-primary"
         >
-          <Flex align="center" gap="sm" style={{ minWidth: 0, flex: 1 }}>
-            <Flex align="center" gap="sm" style={{ minWidth: 0 }}>
-              <Image src={icon} w={20} h={20} />
-              <Text span c="chatbox-secondary" size="xl" lh={1.2} fw="700" truncate>
-                Chatbox
-              </Text>
+          {isSmallScreen && isSessionReordering ? (
+            <Flex align="center" justify="space-between" px="sm" h={36} className="mobile-reorder-mode-card w-full">
+              <Flex align="center" gap={6}>
+                <IconArrowsMoveVertical size={16} className="text-chatbox-tertiary" />
+                <Text size="sm" fw={500} c="chatbox-secondary">
+                  {t('Adjust order')}
+                </Text>
+              </Flex>
+              <Button variant="subtle" size="compact-sm" onClick={() => setIsSessionReordering(false)}>
+                {t('Done')}
+              </Button>
             </Flex>
-            {FORCE_ENABLE_DEV_PAGES && <ThemeSwitchButton size="xs" />}
-          </Flex>
+          ) : (
+            <>
+              <Flex align="center" gap="sm" style={{ minWidth: 0, flex: 1 }}>
+                <Flex align="center" gap="sm" style={{ minWidth: 0 }}>
+                  <Image src={icon} w={20} h={20} />
+                  <Text span c="chatbox-secondary" size="xl" lh={1.2} fw="700" truncate>
+                    Chatbox
+                  </Text>
+                </Flex>
+                {FORCE_ENABLE_DEV_PAGES && <ThemeSwitchButton size="xs" />}
+              </Flex>
 
-          <Flex align="center" gap={2} style={{ flexShrink: 0 }}>
-            <Tooltip label={t('Search')} openDelay={1000} withArrow>
-              <ActionIcon
-                variant="subtle"
-                color="chatbox-tertiary"
-                size={26}
-                radius="md"
-                onClick={() => setOpenSearchDialog(true, true)}
-              >
-                <IconSearch size={18} />
-              </ActionIcon>
-            </Tooltip>
-            {!isSmallScreen && (
-              <Tooltip label={t('Collapse')} openDelay={1000} withArrow>
-                <ActionIcon
-                  variant="subtle"
-                  color="chatbox-tertiary"
-                  size={26}
-                  radius="md"
-                  onClick={() => setShowSidebar(false)}
-                >
-                  <IconLayoutSidebarLeftCollapse size={18} />
-                </ActionIcon>
-              </Tooltip>
-            )}
-          </Flex>
+              <Flex align="center" gap={2} style={{ flexShrink: 0 }}>
+                <Tooltip label={t('Search')} openDelay={1000} withArrow>
+                  <ActionIcon
+                    variant="subtle"
+                    color="chatbox-tertiary"
+                    size={26}
+                    radius="md"
+                    onClick={() => setOpenSearchDialog(true, true)}
+                  >
+                    <IconSearch size={18} />
+                  </ActionIcon>
+                </Tooltip>
+                {!isSmallScreen && (
+                  <Tooltip label={t('Collapse')} openDelay={1000} withArrow>
+                    <ActionIcon
+                      variant="subtle"
+                      color="chatbox-tertiary"
+                      size={26}
+                      radius="md"
+                      onClick={() => setShowSidebar(false)}
+                    >
+                      <IconLayoutSidebarLeftCollapse size={18} />
+                    </ActionIcon>
+                  </Tooltip>
+                )}
+              </Flex>
+            </>
+          )}
         </Flex>
 
         <SessionList
           sessionListViewportRef={sessionListViewportRef}
+          initialCenterSessionId={coldStartCenterSessionId}
           onContentWidthHint={updateMobileSidebarContentWidth}
+          isReordering={isSessionReordering}
+          onReorderingChange={setIsSessionReordering}
         />
 
         <SidebarUpdateBanner />

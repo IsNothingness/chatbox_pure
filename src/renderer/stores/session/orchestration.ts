@@ -20,8 +20,8 @@ import {
   trackAgentModeSuggested,
   trackWorkModeSuggestionDecision,
 } from '@/analytics/agent-mode'
-import i18n from '@/i18n'
-import { showGenerationCompleteNotification } from '@/native/stream-http'
+import { registerNativeGenerationContext, releaseNativeGenerationContext } from '@/native/background-generation-context'
+import { acknowledgeNativeStreams } from '@/native/stream-http'
 import { AppActionApprovalPausedError } from '@/packages/app-action-approval'
 import * as appleAppStore from '@/packages/apple_app_store'
 import { wakeBackgroundTaskFollowUps } from '@/packages/chatbox-cli/background-follow-up'
@@ -454,6 +454,8 @@ export async function orchestrateGeneration(
     appendToMessage?: boolean
     skipAgentModeSuggestion?: boolean
     agentModeEntrySource?: AgentModeEntrySource
+    resumeNativeStreamId?: string
+    backgroundRecovery?: boolean
   }
 ) {
   const session = await chatStore.getSession(sessionId)
@@ -465,7 +467,9 @@ export async function orchestrateGeneration(
     return
   }
 
-  trackGenerateEvent(sessionId, settings, globalSettings, session.type, options)
+  if (!options?.backgroundRecovery) {
+    trackGenerateEvent(sessionId, settings, globalSettings, session.type, options)
+  }
 
   const startTime = Date.now()
   let firstTokenLatency: number | undefined
@@ -482,6 +486,12 @@ export async function orchestrateGeneration(
   const promptTargetMsgIx = options?.appendToMessage ? targetMsgIx + 1 : targetMsgIx
 
   const controller = new AbortController()
+  registerNativeGenerationContext(controller.signal, {
+    clientRequestId: `${sessionId}:${targetMsg.id}`,
+    sessionId,
+    messageId: targetMsg.id,
+    resumeStreamId: options?.resumeNativeStreamId,
+  })
   // Wire the stop button to this controller before any pre-stream network work
   // runs (agent-mode suggestion classifier, MCP/tool harness setup). Those steps
   // issue real requests that can hang; without a cancel handler in the message
@@ -717,17 +727,6 @@ export async function orchestrateGeneration(
     }
 
     await persistStreamingMessage(sessionId, targetMsg, { refreshCounting: true })
-    if (
-      platform.type === 'mobile' &&
-      globalSettings.keepGeneratingInBackground &&
-      globalSettings.notifyWhenGenerationCompletes &&
-      !(await platform.isWindowFocused())
-    ) {
-      await showGenerationCompleteNotification(
-        i18n.t('Reply generated'),
-        i18n.t('Tap to return to ChatBox Pure and view the reply.')
-      )
-    }
     appleAppStore.tickAfterMessageGenerated()
   } catch (err: unknown) {
     const pause = getToolCallPause(err)
@@ -765,7 +764,24 @@ export async function orchestrateGeneration(
       operationType: options?.operationType,
     })
     await persistStreamingMessage(sessionId, targetMsg, { refreshCounting: true })
+  } finally {
+    await acknowledgeNativeStreams(releaseNativeGenerationContext(controller.signal))
   }
+}
+
+export function resumeNativeBackgroundGeneration(sessionId: string, targetMsg: Message, streamId: string) {
+  const appendToMessage = targetMsg.contentParts.some(
+    (part) => part.type === 'tool-call' && (part.state === 'result' || part.state === 'error')
+  )
+  return withSessionGenerationLock(sessionId, () =>
+    orchestrateGeneration(sessionId, targetMsg, {
+      operationType: 'regenerate',
+      appendToMessage,
+      skipAgentModeSuggestion: true,
+      resumeNativeStreamId: streamId,
+      backgroundRecovery: true,
+    })
+  )
 }
 
 async function buildToolsForPausedToolCall(session: Session, settings: SessionSettings, targetMsg: Message) {

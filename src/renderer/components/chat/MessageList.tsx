@@ -91,7 +91,6 @@ export function clearScrollPositionCache(sessionId: string) {
 export interface MessageListRef {
   scrollToTop: (behavior?: ScrollBehavior) => void
   scrollToBottom: (behavior?: ScrollBehavior) => void
-  setIsNewMessage: (flag: boolean) => void
 }
 
 export interface MessageListProps {
@@ -222,8 +221,6 @@ const MessageList = forwardRef<MessageListRef, MessageListProps>((props, ref) =>
     })
   )
   const messageListRef = useRef<HTMLDivElement>(null)
-  const [messageViewportHeight, setMessageViewportHeight] = useState(0)
-  const [isNewMessage, setIsNewMessage] = useState(false)
 
   const setMessageListElement = useUIStore((s) => s.setMessageListElement)
   const setMessageScrolling = useUIStore((s) => s.setMessageScrolling)
@@ -398,36 +395,6 @@ const MessageList = forwardRef<MessageListRef, MessageListProps>((props, ref) =>
     return () => smoothFollowOutput.dispose()
   }, [smoothFollowOutput])
 
-  useEffect(() => {
-    const element = messageListRef.current
-    if (!element) {
-      return
-    }
-
-    const updateViewportHeight = () => {
-      setMessageViewportHeight(element.clientHeight)
-    }
-
-    updateViewportHeight()
-
-    if (typeof ResizeObserver === 'undefined') {
-      window.addEventListener('resize', updateViewportHeight)
-      return () => {
-        window.removeEventListener('resize', updateViewportHeight)
-      }
-    }
-
-    const observer = new ResizeObserver(() => {
-      updateViewportHeight()
-    })
-
-    observer.observe(element)
-
-    return () => {
-      observer.disconnect()
-    }
-  }, [])
-
   const platformType = useAtomValue(platformTypeAtom)
 
   const renderMessageBlock = useCallback(
@@ -485,7 +452,6 @@ const MessageList = forwardRef<MessageListRef, MessageListProps>((props, ref) =>
       smoothFollowOutput.resume()
       virtuoso.current?.scrollTo({ top: Infinity, behavior })
     },
-    setIsNewMessage: (value: boolean) => setIsNewMessage(value),
   }))
 
   return (
@@ -521,14 +487,7 @@ const MessageList = forwardRef<MessageListRef, MessageListProps>((props, ref) =>
               if (item.type === 'group') {
                 return (
                   <div className={itemClassName}>
-                    <div
-                      className="flex flex-col pt-5"
-                      style={
-                        messageViewportHeight > 0 && isNewMessage
-                          ? { minHeight: `${messageViewportHeight}px` }
-                          : undefined
-                      } // key
-                    >
+                    <div className="flex flex-col pt-5">
                       {item.messages.map((message, messageIndex) =>
                         renderMessageBlock(message, {
                           isFirstItem: isFirstItem && messageIndex === 0,

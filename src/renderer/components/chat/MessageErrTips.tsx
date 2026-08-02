@@ -1,35 +1,16 @@
-import NiceModal from '@ebay/nice-modal-react'
 import { ActionIcon, Flex, Loader, Text, Tooltip } from '@mantine/core'
 import { Link } from '@mui/material'
 import { aiProviderNameHash } from '@shared/models'
-import { ChatboxAIAPIError } from '@shared/models/errors'
 import type { Message } from '@shared/types'
-import { ModelProviderEnum } from '@shared/types/provider'
 import { IconCheck, IconChevronDown, IconChevronUp, IconCopy, IconLanguage, IconReload } from '@tabler/icons-react'
 import type React from 'react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Trans, useTranslation } from 'react-i18next'
-import {
-  trackAgentModeFreePointsCard,
-  trackAgentModeFreePointsCardClick,
-  trackAgentModeFreePointsClaimSuccess,
-} from '@/analytics/agent-mode'
-import { trackJkClickEvent } from '@/analytics/jk'
-import { JK_EVENTS, JK_PAGE_NAMES } from '@/analytics/jk-events'
-import { ChatboxAIErrorMessage } from '@/components/common/ChatboxAIErrorMessage'
 import { useCopied } from '@/hooks/useCopied'
 import { navigateToSettings } from '@/modals/Settings'
-import { AgentModeRewardResumeError, claimAgentModeRewardAndResume } from '@/packages/agent-mode-reward'
-import { buildChatboxUrl, claimFreeAgentModeReward } from '@/packages/remote'
 import { translateTexts } from '@/packages/translation'
-import platform from '@/platform'
 import * as settingActions from '@/stores/settingActions'
-import { useLanguage, useSettingsStore } from '@/stores/settingsStore'
-import * as toastActions from '@/stores/toastActions'
-import LinkTargetBlank from '../common/Link'
-import { AgentModeRewardQuotaCard } from './AgentModeRewardQuotaCard'
-import { resolveMessageErrorPresentation } from './message-error-presentation'
-import { QuotaExhaustedCard } from './QuotaExhaustedCard'
+import { useLanguage } from '@/stores/settingsStore'
 
 const MAX_CHARS = 200
 const MAX_LINES = 3
@@ -158,17 +139,12 @@ export default function MessageErrTips(props: {
   onRetry?: () => void | Promise<void>
   isBubbleLayout?: boolean
 }) {
-  const { msg, sessionId, onRetry, isBubbleLayout } = props
+  const { msg, onRetry, isBubbleLayout } = props
   const { t } = useTranslation()
   const [expanded, setExpanded] = useState(false)
-  const licenseKey = useSettingsStore((state) => state.licenseKey)
   const language = useLanguage()
   const [translatedText, setTranslatedText] = useState<string | null>(null)
   const [isTranslating, setIsTranslating] = useState(false)
-  const [isHandlingAgentModeReward, setIsHandlingAgentModeReward] = useState(false)
-  const [agentModeRewardClaimFailed, setAgentModeRewardClaimFailed] = useState(false)
-  const [agentModeRewardClaimed, setAgentModeRewardClaimed] = useState(false)
-  const [agentModeRewardResumeFailed, setAgentModeRewardResumeFailed] = useState(false)
 
   const errorMessage = msg.errorExtra?.responseBody
     ? (() => {
@@ -196,25 +172,6 @@ export default function MessageErrTips(props: {
   const { copied, copy } = useCopied(displayedErrorMessage)
   const isTruncated = shouldTruncate(errorMessage)
   const showTranslateButton = language !== 'en' && errorMessage.length > 0
-  const errorPresentation = resolveMessageErrorPresentation(msg)
-  const agentModeTrackingContext = useMemo(
-    () =>
-      sessionId
-        ? {
-            sessionId,
-            mode: 'work_mode' as const,
-            provider: msg.aiProvider,
-            model: msg.model,
-          }
-        : null,
-    [msg.aiProvider, msg.model, sessionId]
-  )
-
-  useEffect(() => {
-    if (errorPresentation === 'agent-mode-reward' && agentModeTrackingContext) {
-      trackAgentModeFreePointsCard(agentModeTrackingContext)
-    }
-  }, [agentModeTrackingContext, errorPresentation])
 
   const handleTranslate = useCallback(async () => {
     if (translatedText) {
@@ -232,87 +189,11 @@ export default function MessageErrTips(props: {
     }
   }, [errorMessage, language, translatedText])
 
-  const handleAgentModeRewardAction = useCallback(async () => {
-    if (isHandlingAgentModeReward || !onRetry || !licenseKey) {
-      return
-    }
-    if (!agentModeRewardClaimed && agentModeTrackingContext) {
-      trackAgentModeFreePointsCardClick(agentModeTrackingContext)
-    }
-    setIsHandlingAgentModeReward(true)
-    setAgentModeRewardClaimFailed(false)
-    setAgentModeRewardResumeFailed(false)
-
-    if (agentModeRewardClaimed) {
-      try {
-        await onRetry()
-      } catch (error) {
-        console.error('Failed to resume Agent Mode after claiming the reward:', error)
-        setAgentModeRewardResumeFailed(true)
-        toastActions.add(t('Reward claimed, but the task could not resume automatically. Please retry.'))
-      } finally {
-        setIsHandlingAgentModeReward(false)
-      }
-      return
-    }
-
-    try {
-      await claimAgentModeRewardAndResume({
-        claim: () => claimFreeAgentModeReward(licenseKey),
-        showSuccess: (reward) => {
-          setAgentModeRewardClaimed(true)
-          if (agentModeTrackingContext) {
-            trackAgentModeFreePointsClaimSuccess(agentModeTrackingContext)
-          }
-          void NiceModal.show('agent-mode-reward-claim-success', reward).catch(() => undefined)
-        },
-        resume: async () => {
-          await onRetry()
-        },
-      })
-    } catch (error) {
-      if (error instanceof AgentModeRewardResumeError) {
-        console.error('Failed to resume Agent Mode after claiming the reward:', error.resumeCause)
-        setAgentModeRewardClaimed(true)
-        setAgentModeRewardResumeFailed(true)
-        toastActions.add(t('Reward claimed, but the task could not resume automatically. Please retry.'))
-        return
-      }
-      console.error('Failed to claim Agent Mode reward:', error)
-      setAgentModeRewardClaimFailed(true)
-    } finally {
-      setIsHandlingAgentModeReward(false)
-    }
-  }, [agentModeRewardClaimed, agentModeTrackingContext, isHandlingAgentModeReward, licenseKey, onRetry, t])
-
-  const handleUpgradePlan = useCallback(() => {
-    platform.openLink(
-      buildChatboxUrl(`/redirect_app/view_more_plans/${language}?utm_source=app&utm_content=msg_quota_exhausted`)
-    )
-  }, [language])
-
   if (!msg.error) {
     return null
   }
 
-  if (errorPresentation === 'quota-exhausted' || errorPresentation === 'free-quota-exhausted') {
-    return <QuotaExhaustedCard kind={errorPresentation} onUpgrade={handleUpgradePlan} />
-  }
-
-  if (errorPresentation === 'agent-mode-reward') {
-    return (
-      <AgentModeRewardQuotaCard
-        loading={isHandlingAgentModeReward}
-        claimFailed={agentModeRewardClaimFailed}
-        rewardClaimed={agentModeRewardClaimed}
-        resumeFailed={agentModeRewardResumeFailed}
-        onAction={handleAgentModeRewardAction}
-      />
-    )
-  }
-
   const tips: React.ReactNode[] = []
-  let onlyShowTips = false // 是否只显示提示，不显示错误信息详情
 
   if (isContextLengthError(msg.error) || isContextLengthError(errorMessage)) {
     tips.push(
@@ -352,29 +233,10 @@ export default function MessageErrTips(props: {
           }}
         />
       )
-    } else if (msg.aiProvider === ModelProviderEnum.ChatboxAI) {
-      tips.push(
-        <Trans
-          i18nKey="Connection to {{aiProvider}} failed. This typically occurs due to a temporary service issue. Please try again later or <buttonOpenSettings>check your settings</buttonOpenSettings>."
-          values={{
-            aiProvider: aiProviderNameHash[ModelProviderEnum.ChatboxAI],
-          }}
-          components={{
-            buttonOpenSettings: (
-              <a
-                className="cursor-pointer underline font-bold hover:text-blue-600 transition-colors"
-                onClick={() => {
-                  navigateToSettings(`/provider/${ModelProviderEnum.ChatboxAI}`)
-                }}
-              />
-            ),
-          }}
-        />
-      )
     } else {
       tips.push(
         <Trans
-          i18nKey="Connection to {{aiProvider}} failed. This typically occurs due to incorrect configuration or {{aiProvider}} account issues. Please <buttonOpenSettings>check your settings</buttonOpenSettings> and verify your {{aiProvider}} account status, or purchase a <LinkToLicensePricing>Chatbox AI License</LinkToLicensePricing> to unlock all advanced models instantly without any configuration."
+          i18nKey="provider connection error tips"
           values={{
             aiProvider: msg.aiProvider
               ? aiProviderNameHash[msg.aiProvider as keyof typeof aiProviderNameHash]
@@ -389,15 +251,6 @@ export default function MessageErrTips(props: {
                 }}
               />
             ),
-            LinkToLicensePricing: (
-              <LinkTargetBlank
-                className="!font-bold !text-gray-700 hover:!text-blue-600 transition-colors"
-                href={buildChatboxUrl(
-                  `/redirect_app/advanced_url_processing/${settingActions.getLanguage()}?utm_source=app&utm_content=msg_bad_provider`
-                )}
-              />
-            ),
-            a: <a href={buildChatboxUrl(`/redirect_app/faqs/${settingActions.getLanguage()}`)} target="_blank" />,
           }}
         />
       )
@@ -435,24 +288,8 @@ export default function MessageErrTips(props: {
         ]}
       />
     )
-  } else if (msg.errorCode && ChatboxAIAPIError.getDetail(msg.errorCode)) {
-    onlyShowTips = true
-    tips.push(<ChatboxAIErrorMessage errorCode={msg.errorCode} model={msg.model} />)
   } else {
-    tips.push(
-      <Trans
-        i18nKey="unknown error tips"
-        components={[
-          <a
-            key="a"
-            href={buildChatboxUrl(
-              `/redirect_app/faqs/${settingActions.getLanguage()}?utm_source=app&utm_content=msg_error_unknown`
-            )}
-            target="_blank"
-          ></a>,
-        ]}
-      />
-    )
+    tips.push(<Trans i18nKey="pure unknown error tips" />)
   }
   return (
     <div
@@ -484,87 +321,50 @@ export default function MessageErrTips(props: {
           {t('Request ID: {{requestId}}', { requestId })}
         </Text>
       )}
-      {onlyShowTips ? null : (
-        <>
-          <br />
-          <br />
-          {isTruncated ? (
-            <div
-              className="text-sm p-2 rounded-md bg-red-50 dark:bg-red-900/20 cursor-pointer overflow-hidden"
-              onClick={() => setExpanded(!expanded)}
-            >
-              <Flex align="flex-start" gap="xs" className="min-w-0">
-                <ActionIcon variant="transparent" size="xs" c="red" p={0} className="flex-shrink-0">
-                  {expanded ? <IconChevronUp size={14} /> : <IconChevronDown size={14} />}
-                </ActionIcon>
-                <div className="flex-1 min-w-0 whitespace-pre-wrap break-all">
-                  {expanded ? displayedErrorMessage : getTruncatedText(displayedErrorMessage)}
-                </div>
-              </Flex>
-              <ErrorActionButtons
-                showTranslateButton={showTranslateButton}
-                translatedText={translatedText}
-                isTranslating={isTranslating}
-                copied={copied}
-                onTranslate={(e) => {
-                  e.stopPropagation()
-                  if (!expanded) setExpanded(true)
-                  handleTranslate()
-                }}
-                onCopy={(e) => {
-                  e.stopPropagation()
-                  copy()
-                }}
-                t={t}
-              />
+      <br />
+      <br />
+      {isTruncated ? (
+        <div
+          className="text-sm p-2 rounded-md bg-red-50 dark:bg-red-900/20 cursor-pointer overflow-hidden"
+          onClick={() => setExpanded(!expanded)}
+        >
+          <Flex align="flex-start" gap="xs" className="min-w-0">
+            <ActionIcon variant="transparent" size="xs" c="red" p={0} className="flex-shrink-0">
+              {expanded ? <IconChevronUp size={14} /> : <IconChevronDown size={14} />}
+            </ActionIcon>
+            <div className="flex-1 min-w-0 whitespace-pre-wrap break-all">
+              {expanded ? displayedErrorMessage : getTruncatedText(displayedErrorMessage)}
             </div>
-          ) : (
-            <div className="text-sm p-2 rounded-md bg-red-50 dark:bg-red-900/20 overflow-hidden">
-              <div className="whitespace-pre-wrap break-all">{displayedErrorMessage}</div>
-              <ErrorActionButtons
-                showTranslateButton={showTranslateButton}
-                translatedText={translatedText}
-                isTranslating={isTranslating}
-                copied={copied}
-                onTranslate={handleTranslate}
-                onCopy={copy}
-                t={t}
-              />
-            </div>
-          )}
-        </>
-      )}
-      {/* Free trial suggestion for users without license (skip for ChatboxAI errors) */}
-      {!licenseKey && msg.aiProvider !== ModelProviderEnum.ChatboxAI && (
-        <div className="mt-3 pt-3 border-t border-red-200 dark:border-red-800/30 text-right">
-          <Tooltip
-            label={t(
-              'If you have never had a license before, you can claim it after logging in on the official website.'
-            )}
-            withArrow
-            multiline
-            maw={240}
-            position="bottom-end"
-            styles={{
-              tooltip: {
-                backgroundColor: 'rgba(0, 0, 0, 0.75)',
-                backdropFilter: 'blur(4px)',
-              },
+          </Flex>
+          <ErrorActionButtons
+            showTranslateButton={showTranslateButton}
+            translatedText={translatedText}
+            isTranslating={isTranslating}
+            copied={copied}
+            onTranslate={(e) => {
+              e.stopPropagation()
+              if (!expanded) setExpanded(true)
+              handleTranslate()
             }}
-          >
-            <span
-              className="text-sm font-medium text-blue-600 cursor-pointer hover:text-blue-700 hover:underline transition-colors"
-              onClick={() => {
-                trackJkClickEvent(JK_EVENTS.FREE_LICENSE_CLAIM_CLICK, {
-                  pageName: JK_PAGE_NAMES.CHAT_PAGE,
-                  content: 'chat_error',
-                })
-                platform.openLink('https://chatboxai.app/login')
-              }}
-            >
-              {t('Chatbox AI free trial available')} →
-            </span>
-          </Tooltip>
+            onCopy={(e) => {
+              e.stopPropagation()
+              copy()
+            }}
+            t={t}
+          />
+        </div>
+      ) : (
+        <div className="text-sm p-2 rounded-md bg-red-50 dark:bg-red-900/20 overflow-hidden">
+          <div className="whitespace-pre-wrap break-all">{displayedErrorMessage}</div>
+          <ErrorActionButtons
+            showTranslateButton={showTranslateButton}
+            translatedText={translatedText}
+            isTranslating={isTranslating}
+            copied={copied}
+            onTranslate={handleTranslate}
+            onCopy={copy}
+            t={t}
+          />
         </div>
       )}
     </div>

@@ -11,9 +11,10 @@ import {
   IconPinnedFilled,
   IconTrash,
 } from '@tabler/icons-react'
+import { useRouterState } from '@tanstack/react-router'
 import clsx from 'clsx'
 import dayjs from 'dayjs'
-import { type MouseEvent, memo, type PointerEvent, useState } from 'react'
+import { type MouseEvent, memo, type PointerEvent, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useIsSmallScreen } from '@/hooks/useScreenChange'
 import { navigateToSettings } from '@/modals/Settings'
@@ -63,6 +64,7 @@ function SessionItem(props: Props) {
   const pinActionLabel = session.starred ? t('Unpin') : t('Pin')
   const archiveActionLabel = t('Archive')
   const conversationListMenu = useSettingsStore((state) => state.conversationListMenu)
+  const showSidebar = useUIStore((s) => s.showSidebar)
   const setShowSidebar = useUIStore((s) => s.setShowSidebar)
   const onClick = () => {
     if (props.isReordering && props.onSelectWhileReordering?.() === false) {
@@ -81,6 +83,21 @@ function SessionItem(props: Props) {
   const [deleting, setDeleting] = useState(false)
   const [actionTooltipDismissed, setActionTooltipDismissed] = useState(false)
   const [mobileMenuOpened, setMobileMenuOpened] = useState(false)
+  const currentPathname = useRouterState({ select: (state) => state.location.pathname })
+  const previousPathnameRef = useRef(currentPathname)
+
+  useEffect(() => {
+    if (previousPathnameRef.current !== currentPathname) {
+      previousPathnameRef.current = currentPathname
+      setMobileMenuOpened(false)
+    }
+  }, [currentPathname])
+
+  useEffect(() => {
+    if (!showSidebar) {
+      setMobileMenuOpened(false)
+    }
+  }, [showSidebar])
 
   const stopItemClick = (event: MouseEvent | PointerEvent) => {
     event.stopPropagation()
@@ -162,7 +179,10 @@ function SessionItem(props: Props) {
         return
       }
       await copyAndSwitchSession(fullSession)
-      setShowSidebar(false)
+      // Keep the list visible after duplication so the newly inserted session
+      // remains selected in context. The user can enter it by closing the
+      // sidebar or tapping it explicitly.
+      setShowSidebar(true)
     } catch (error) {
       console.error('Failed to copy session:', error)
     } finally {
@@ -268,7 +288,7 @@ function SessionItem(props: Props) {
         props.isReordering && 'cursor-default',
         isSmallScreen
           ? props.isReordering
-            ? 'bg-chatbox-background-primary'
+            ? 'mobile-session-reorder-pill'
             : ''
           : selected
             ? 'bg-chatbox-background-brand-secondary'

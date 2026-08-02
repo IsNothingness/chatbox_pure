@@ -3,6 +3,9 @@ export const FULL_LOAD_THRESHOLD = 200
 export const COLD_ZONE_DISTANCE = 200
 export const PREFETCHED_PAGE_TTL_MS = 10_000
 export const VIEWED_PAGE_TTL_MS = 30_000
+export const REORDER_SWAP_PENETRATION_RATIO = 0.25
+export const REORDER_EDGE_SCROLL_ZONE_PX = 96
+export const REORDER_EDGE_SCROLL_MAX_SPEED_PX_PER_SECOND = 1_200
 
 export type ScrollDirection = -1 | 0 | 1
 
@@ -13,6 +16,76 @@ export type SessionListSlot =
 export interface SessionRange {
   start: number
   end: number
+}
+
+export type SessionReorderGroup = 'pinned' | 'chats'
+export type SessionPlacementPreviewKind = 'source' | 'destination'
+
+export interface SessionReorderTarget {
+  targetIndex: number | null
+  crossedGroup: boolean
+}
+
+export type PlacementPreviewAction = 'clear' | 'keep-confirmed' | 'keep-pending' | 'start-pending'
+
+export function getPlacementPreviewAction(options: {
+  currentPreviewKey: string | null
+  pendingCandidateKey: string | null
+  nextCandidateKey: string | null
+  listMoved: boolean
+}): PlacementPreviewAction {
+  if (options.nextCandidateKey === null) return 'clear'
+  if (options.currentPreviewKey === options.nextCandidateKey) return 'keep-confirmed'
+  if (options.listMoved) return 'clear'
+  if (options.pendingCandidateKey === options.nextCandidateKey) return 'keep-pending'
+  return 'start-pending'
+}
+
+export function getSessionReorderVisualOffset(options: {
+  displayIndex: number
+  activeDisplayIndex: number | null
+  dragDetached: boolean
+  placementTargetDisplayIndex: number | null
+  placementEdge: 'top' | 'bottom' | null
+  placementKind: SessionPlacementPreviewKind | null
+  itemHeight: number
+}): number {
+  let offset = 0
+  if (
+    options.dragDetached &&
+    options.activeDisplayIndex !== null &&
+    options.displayIndex > options.activeDisplayIndex
+  ) {
+    offset -= options.itemHeight
+  }
+
+  if (
+    options.placementTargetDisplayIndex === null ||
+    options.placementEdge === null ||
+    // When the card has reattached to its source, the source row itself is
+    // already the single cyan slot. Opening another gap would double it.
+    (options.placementKind === 'source' && !options.dragDetached)
+  ) {
+    return offset
+  }
+
+  const followsPlacement =
+    options.placementEdge === 'top'
+      ? options.displayIndex >= options.placementTargetDisplayIndex
+      : options.displayIndex > options.placementTargetDisplayIndex
+  return followsPlacement ? offset + options.itemHeight : offset
+}
+
+export function isWithinSourcePlacementZone(options: {
+  distanceFromSourceCenter: number
+  sourceCandidateActive: boolean
+  itemHeight: number
+}): boolean {
+  // Enter while the dragged card's center is anywhere inside its source row.
+  // Once the cyan source slot is active, keep a small hysteresis band so
+  // normal Android touch jitter cannot repeatedly clear and recreate it.
+  const halfZone = options.sourceCandidateActive ? options.itemHeight * 0.625 : options.itemHeight / 2
+  return Math.abs(options.distanceFromSourceCenter) <= halfZone
 }
 
 export function getSessionListDisplayCount(total: number, pinnedCount: number): number {
@@ -38,6 +111,48 @@ export function getSessionListSlot(displayIndex: number, total: number, pinnedCo
     return { type: 'section', id: 'section:chats', label: 'Chats' }
   }
   return { type: 'session', sessionIndex: displayIndex - 2 }
+}
+
+export function sessionIndexToDisplayIndex(sessionIndex: number, pinnedCount: number): number {
+  if (pinnedCount <= 0) return sessionIndex
+  return sessionIndex < pinnedCount ? sessionIndex + 1 : sessionIndex + 2
+}
+
+export function getSessionReorderTarget(
+  displayIndex: number,
+  total: number,
+  pinnedCount: number,
+  group: SessionReorderGroup
+): SessionReorderTarget {
+  if (total <= 0) return { targetIndex: null, crossedGroup: false }
+
+  const clampedDisplayIndex = Math.max(0, Math.min(getSessionListDisplayCount(total, pinnedCount) - 1, displayIndex))
+  if (pinnedCount <= 0) {
+    return group === 'chats'
+      ? { targetIndex: clampedDisplayIndex, crossedGroup: false }
+      : { targetIndex: null, crossedGroup: true }
+  }
+
+  if (group === 'pinned') {
+    const chatsHeaderIndex = pinnedCount + 1
+    if (pinnedCount < total && clampedDisplayIndex >= chatsHeaderIndex) {
+      return { targetIndex: null, crossedGroup: true }
+    }
+    const slot = getSessionListSlot(clampedDisplayIndex, total, pinnedCount)
+    return {
+      targetIndex: slot?.type === 'session' ? Math.min(slot.sessionIndex, pinnedCount - 1) : 0,
+      crossedGroup: false,
+    }
+  }
+
+  if (clampedDisplayIndex <= pinnedCount) {
+    return { targetIndex: null, crossedGroup: true }
+  }
+  const slot = getSessionListSlot(clampedDisplayIndex, total, pinnedCount)
+  return {
+    targetIndex: slot?.type === 'session' ? Math.max(slot.sessionIndex, pinnedCount) : pinnedCount,
+    crossedGroup: false,
+  }
 }
 
 export function displayRangeToSessionRange(
@@ -82,6 +197,71 @@ export function getPageStartsForRange(range: SessionRange, pageSize = SESSION_PA
     starts.push(pageStart)
   }
   return starts
+}
+
+export function moveItemInPagedCache<T>(
+  pages: Map<number, T[]>,
+  oldIndex: number,
+  newIndex: number,
+  pageSize = SESSION_PAGE_SIZE
+): boolean {
+  if (oldIndex === newIndex) return true
+  const start = Math.min(oldIndex, newIndex)
+  const end = Math.max(oldIndex, newIndex)
+  const items: T[] = []
+  for (let index = start; index <= end; index += 1) {
+    const pageStart = Math.floor(index / pageSize) * pageSize
+    const item = pages.get(pageStart)?.[index - pageStart]
+    if (item === undefined) return false
+    items.push(item)
+  }
+
+  const movedOffset = oldIndex - start
+  const targetOffset = newIndex - start
+  const [movedItem] = items.splice(movedOffset, 1)
+  items.splice(targetOffset, 0, movedItem)
+  for (let offset = 0; offset < items.length; offset += 1) {
+    const index = start + offset
+    const pageStart = Math.floor(index / pageSize) * pageSize
+    const page = pages.get(pageStart)
+    if (!page) return false
+    page[index - pageStart] = items[offset]
+  }
+  return true
+}
+
+export function shouldSwitchReorderTarget(options: {
+  currentIndex: number
+  candidateIndex: number
+  dragCenterY: number
+  candidateTop: number
+  candidateBottom: number
+  penetrationRatio?: number
+}): boolean {
+  if (options.currentIndex === options.candidateIndex) return true
+  const candidateHeight = Math.max(0, options.candidateBottom - options.candidateTop)
+  const penetration = candidateHeight * (options.penetrationRatio ?? REORDER_SWAP_PENETRATION_RATIO)
+  return options.candidateIndex > options.currentIndex
+    ? options.dragCenterY >= options.candidateTop + penetration
+    : options.dragCenterY <= options.candidateBottom - penetration
+}
+
+export function getReorderEdgeScrollVelocity(options: {
+  pointerY: number
+  viewportTop: number
+  viewportBottom: number
+  edgeZone?: number
+  maxSpeed?: number
+}): number {
+  const edgeZone = Math.max(1, options.edgeZone ?? REORDER_EDGE_SCROLL_ZONE_PX)
+  const maxSpeed = Math.max(0, options.maxSpeed ?? REORDER_EDGE_SCROLL_MAX_SPEED_PX_PER_SECOND)
+  const topProgress = Math.min(1, Math.max(0, (options.viewportTop + edgeZone - options.pointerY) / edgeZone))
+  const bottomProgress = Math.min(1, Math.max(0, (options.pointerY - (options.viewportBottom - edgeZone)) / edgeZone))
+
+  if (topProgress === bottomProgress) return 0
+  const progress = Math.max(topProgress, bottomProgress)
+  const direction = bottomProgress > topProgress ? 1 : -1
+  return direction * maxSpeed * progress * progress
 }
 
 export interface ColdPageCandidate {

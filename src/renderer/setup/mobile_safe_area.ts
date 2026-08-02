@@ -81,10 +81,12 @@ void SafeArea.addListener('safeAreaChanged', ({ insets }) => {
 })
 
 void Keyboard.addListener('keyboardWillShow', () => {
+  document.documentElement.dataset.keyboardVisible = 'true'
   document.documentElement.style.setProperty('--mobile-safe-area-inset-bottom', '0px')
 })
 
 void Keyboard.addListener('keyboardWillHide', () => {
+  document.documentElement.dataset.keyboardVisible = 'false'
   void SafeArea.getSafeAreaInsets().then(({ insets }) => {
     setSafeAreaInsets(insets)
   })

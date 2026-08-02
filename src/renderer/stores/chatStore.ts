@@ -15,6 +15,7 @@ import {
   type Updater,
   type UpdaterFn,
 } from '@shared/types'
+import { getSortOrderImmediatelyAbove } from '@shared/utils/session-sort'
 import { type InfiniteData, useInfiniteQuery, useQuery } from '@tanstack/react-query'
 import compact from 'lodash/compact'
 import isEmpty from 'lodash/isEmpty'
@@ -157,6 +158,11 @@ export async function listArchivedSessionsMetaPage(cursor: number, limit?: numbe
 export async function countSessionsMeta(): Promise<number> {
   const metaStorage = await getMetaStorage()
   return await metaStorage.getTotal()
+}
+
+export async function getVisibleSessionMetaIndex(id: string): Promise<number | null> {
+  const metaStorage = await getMetaStorage()
+  return await metaStorage.getVisibleIndexById(id)
 }
 
 export async function countArchivedSessionsMeta(): Promise<number> {
@@ -331,7 +337,7 @@ async function runInChunks<T>(items: T[], chunkSize: number, worker: (item: T) =
 }
 
 // create session
-export async function createSession(newSession: Omit<Session, 'id'>, previousId?: string) {
+export async function createSession(newSession: Omit<Session, 'id'>, placeAboveId?: string) {
   console.debug('chatStore', 'createSession', newSession)
   const { chat: lastUsedChatModel, picture: lastUsedPictureModel } = lastUsedModelStore.getState()
   const session = {
@@ -346,15 +352,9 @@ export async function createSession(newSession: Omit<Session, 'id'>, previousId?
 
   const metaStorage = await getMetaStorage()
   let sortOrder = Date.now()
-  if (previousId) {
-    const currentList = getCachedSessionsMeta()
-    const prevIndex = currentList.findIndex((s) => s.id === previousId)
-    if (prevIndex >= 0) {
-      const prevSortOrder = currentList[prevIndex].sortOrder
-      const nextSortOrder =
-        prevIndex + 1 < currentList.length ? currentList[prevIndex + 1].sortOrder : prevSortOrder - 2000
-      sortOrder = (prevSortOrder + nextSortOrder) / 2
-    }
+  if (placeAboveId) {
+    const currentList = await listAllSessionsMeta()
+    sortOrder = getSortOrderImmediatelyAbove(currentList, placeAboveId) ?? sortOrder
   }
 
   const record: SessionMetaRecord = {

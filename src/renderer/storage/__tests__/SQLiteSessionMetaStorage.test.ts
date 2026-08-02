@@ -166,4 +166,34 @@ describe('SQLiteSessionMetaStorage', () => {
 
     expect(mockDatabase.query).toHaveBeenLastCalledWith('SELECT COUNT(*) as total FROM session_meta')
   })
+
+  it('finds a visible session index without loading preceding pages', async () => {
+    const storage = new SQLiteSessionMetaStorage()
+    mockDatabase.query
+      .mockResolvedValueOnce({ values: [{ name: 'archived_at' }] })
+      .mockResolvedValueOnce({ values: [{ starred: 0, sort_order: 250 }] })
+      .mockResolvedValueOnce({ values: [{ total: 37 }] })
+
+    await expect(storage.getVisibleIndexById('target')).resolves.toBe(37)
+
+    expect(mockDatabase.query).toHaveBeenNthCalledWith(
+      2,
+      'SELECT starred, sort_order FROM session_meta WHERE id = ? AND hidden = 0',
+      ['target']
+    )
+    expect(mockDatabase.query).toHaveBeenNthCalledWith(
+      3,
+      expect.stringContaining('SELECT COUNT(*) as total'),
+      [0, 0, 250]
+    )
+  })
+
+  it('returns null when the visible session does not exist', async () => {
+    const storage = new SQLiteSessionMetaStorage()
+    mockDatabase.query
+      .mockResolvedValueOnce({ values: [{ name: 'archived_at' }] })
+      .mockResolvedValueOnce({ values: [] })
+
+    await expect(storage.getVisibleIndexById('missing')).resolves.toBeNull()
+  })
 })

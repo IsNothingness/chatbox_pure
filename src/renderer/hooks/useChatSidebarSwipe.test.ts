@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { describe, expect, it } from 'vitest'
-import { shouldToggleSidebarFromSwipe } from './useChatSidebarSwipe'
+import { shouldIgnoreSidebarSwipeTarget, shouldToggleSidebarFromSwipe } from './useChatSidebarSwipe'
 
 const baseSwipe = {
   startX: 200,
@@ -18,6 +18,16 @@ const baseSwipe = {
 }
 
 describe('chat sidebar swipe decision', () => {
+  it('reserves marked session list areas for scrolling and reordering', () => {
+    const list = document.createElement('div')
+    list.dataset.sidebarSwipeIgnore = ''
+    const item = document.createElement('div')
+    list.append(item)
+
+    expect(shouldIgnoreSidebarSwipeTarget(item)).toBe(true)
+    expect(shouldIgnoreSidebarSwipeTarget(document.createElement('div'))).toBe(false)
+  })
+
   it('opens on a right swipe and closes on a left swipe', () => {
     expect(shouldToggleSidebarFromSwipe(baseSwipe)).toBe(true)
     expect(

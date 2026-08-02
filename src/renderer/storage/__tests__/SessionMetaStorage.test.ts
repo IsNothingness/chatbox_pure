@@ -313,6 +313,19 @@ describe('IndexedDBSessionMetaStorage', () => {
       expect(page2.items.map((r) => r.id)).toEqual(['r2'])
       expect(page2.nextCursor).toBeNull()
     })
+
+    it('finds a visible session index using the same starred and sort order as pages', async () => {
+      await storage.create(makeRecord({ id: 'regular-new', sortOrder: 300 }))
+      await storage.create(makeRecord({ id: 'pinned-old', sortOrder: 100, starred: true }))
+      await storage.create(makeRecord({ id: 'regular-old', sortOrder: 200 }))
+      await storage.create(makeRecord({ id: 'hidden', sortOrder: 400, hidden: true }))
+
+      await expect(storage.getVisibleIndexById('pinned-old')).resolves.toBe(0)
+      await expect(storage.getVisibleIndexById('regular-new')).resolves.toBe(1)
+      await expect(storage.getVisibleIndexById('regular-old')).resolves.toBe(2)
+      await expect(storage.getVisibleIndexById('hidden')).resolves.toBeNull()
+      await expect(storage.getVisibleIndexById('missing')).resolves.toBeNull()
+    })
   })
 
   it('clear removes all records', async () => {

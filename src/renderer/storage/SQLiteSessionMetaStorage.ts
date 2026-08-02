@@ -276,6 +276,27 @@ export class SQLiteSessionMetaStorage implements SessionMetaStorage {
     return { items, nextCursor, total }
   }
 
+  async getVisibleIndexById(id: string): Promise<number | null> {
+    await this.initialize()
+    const targetResult = await this.database.query(
+      'SELECT starred, sort_order FROM session_meta WHERE id = ? AND hidden = 0',
+      [id]
+    )
+    const target = targetResult.values?.[0]
+    if (!target) return null
+
+    const starred = Number(target.starred) === 1 ? 1 : 0
+    const sortOrder = Number(target.sort_order)
+    const indexResult = await this.database.query(
+      `SELECT COUNT(*) as total
+       FROM session_meta
+       WHERE hidden = 0
+         AND (starred > ? OR (starred = ? AND sort_order > ?))`,
+      [starred, starred, sortOrder]
+    )
+    return Number(indexResult.values?.[0]?.total) || 0
+  }
+
   async getTotal(): Promise<number> {
     await this.initialize()
     const result = await this.database.query('SELECT COUNT(*) as total FROM session_meta WHERE hidden = 0')
