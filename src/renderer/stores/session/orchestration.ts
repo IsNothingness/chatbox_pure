@@ -65,6 +65,7 @@ import {
 } from './utils'
 
 const MAX_TOOL_CALLS_BEFORE_CONFIRMATION = 25
+const GRACEFUL_NATIVE_STOP_TIMEOUT_MS = 2000
 
 type ExecutableTool = {
   execute?: (
@@ -539,6 +540,7 @@ export async function orchestrateGeneration(
   const promptTargetMsgIx = options?.appendToMessage ? targetMsgIx + 1 : targetMsgIx
 
   const controller = new AbortController()
+  let hardStopTimer: ReturnType<typeof setTimeout> | null = null
   registerNativeGenerationContext(controller.signal, {
     clientRequestId: `${sessionId}:${targetMsg.id}`,
     sessionId,
@@ -557,9 +559,21 @@ export async function orchestrateGeneration(
         controller.abort()
         return
       }
+      if (hardStopTimer) {
+        clearTimeout(hardStopTimer)
+        hardStopTimer = null
+        controller.abort()
+        return
+      }
       for (const streamId of attachedStreamIds) {
         void cancelNativeStream(streamId)
       }
+      // If the backend already reached a terminal state while the parser is stuck,
+      // cancelling that backend is a no-op. Always retain a hard-stop escape hatch.
+      hardStopTimer = setTimeout(() => {
+        hardStopTimer = null
+        controller.abort()
+      }, GRACEFUL_NATIVE_STOP_TIMEOUT_MS)
     },
   }
   updateStreamingCache(sessionId, targetMsg)
@@ -831,6 +845,10 @@ export async function orchestrateGeneration(
     })
     await persistFinalMessage(targetMsg)
   } finally {
+    if (hardStopTimer) {
+      clearTimeout(hardStopTimer)
+      hardStopTimer = null
+    }
     await acknowledgeNativeStreams(releaseNativeGenerationContext(controller.signal))
   }
 }

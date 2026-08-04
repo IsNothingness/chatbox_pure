@@ -7,9 +7,6 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.io.OutputStream;
-import java.net.HttpURLConnection;
-import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -22,6 +19,14 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+
+import okhttp3.Call;
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
+import okhttp3.ResponseBody;
 
 /**
  * Process-scoped owner for model response streams.
@@ -118,7 +123,7 @@ final class BackgroundStreamManager {
         final List<ChunkRecord> chunks = new ArrayList<>();
 
         StreamRequest request;
-        HttpURLConnection connection;
+        Call call;
         Thread workerThread;
         String state = STATE_PENDING;
         String error;
@@ -184,6 +189,7 @@ final class BackgroundStreamManager {
 
     private final Context appContext;
     private final BackgroundStreamStore persistenceStore;
+    private final OkHttpClient httpClient;
     private final Map<String, StreamTask> tasks = new ConcurrentHashMap<>();
     private final ExecutorService executor = Executors.newCachedThreadPool();
     private final ScheduledExecutorService persistenceExecutor = Executors.newSingleThreadScheduledExecutor();
@@ -191,6 +197,13 @@ final class BackgroundStreamManager {
     private BackgroundStreamManager(Context context) {
         appContext = context.getApplicationContext();
         persistenceStore = new BackgroundStreamStore(appContext);
+        httpClient = new OkHttpClient.Builder()
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .writeTimeout(30, TimeUnit.SECONDS)
+            // Long reasoning streams may legitimately remain silent for a while.
+            .readTimeout(0, TimeUnit.MILLISECONDS)
+            .retryOnConnectionFailure(false)
+            .build();
         loadPersistedTasks();
     }
 
@@ -291,24 +304,24 @@ final class BackgroundStreamManager {
         if (task == null) {
             return;
         }
-        HttpURLConnection connection;
+        Call call;
         Thread workerThread;
         synchronized (task.lock) {
             if (isTerminal(task.state)) {
                 return;
             }
-            connection = task.connection;
+            call = task.call;
             workerThread = task.workerThread;
             task.request = null;
-            task.connection = null;
+            task.call = null;
             task.workerThread = null;
             task.error = "Cancelled";
             task.state = STATE_ERROR;
             task.terminalAt = System.currentTimeMillis();
             task.terminalDurable = false;
         }
-        if (connection != null) {
-            connection.disconnect();
+        if (call != null) {
+            call.cancel();
         }
         if (workerThread != null) {
             workerThread.interrupt();
@@ -335,51 +348,52 @@ final class BackgroundStreamManager {
         }
 
         try {
-            URL url = new URL(request.url);
-            HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-            synchronized (task.lock) {
-                task.connection = connection;
-            }
-
-            connection.setRequestMethod(request.method);
+            Request.Builder requestBuilder = new Request.Builder().url(request.url);
             for (Map.Entry<String, String> header : request.headers.entrySet()) {
-                connection.setRequestProperty(header.getKey(), header.getValue());
-            }
-            connection.setConnectTimeout(30_000);
-            // Model streams can remain silent while reasoning. Cancellation still disconnects.
-            connection.setReadTimeout(0);
-            connection.setUseCaches(false);
-            connection.setDoInput(true);
-
-            if (
-                request.body != null &&
-                !request.body.isEmpty() &&
-                !"GET".equalsIgnoreCase(request.method)
-            ) {
-                byte[] requestBody = request.body.getBytes(StandardCharsets.UTF_8);
-                connection.setDoOutput(true);
-                // Sending a fixed-length JSON body avoids gateway incompatibilities with
-                // chunked request uploads. The response itself remains streamed.
-                connection.setFixedLengthStreamingMode(requestBody.length);
-                try (OutputStream output = connection.getOutputStream()) {
-                    output.write(requestBody);
-                }
+                requestBuilder.header(header.getKey(), header.getValue());
             }
 
-            int responseCode = connection.getResponseCode();
-            boolean successful = responseCode >= 200 && responseCode < 300;
-            InputStream inputStream = successful ? connection.getInputStream() : connection.getErrorStream();
-            if (!successful) {
-                String detail = inputStream == null ? "" : readErrorBody(inputStream);
-                throw new IOException(
-                    "HTTP " + responseCode + (detail.isEmpty() ? "" : ": " + detail)
+            String method = request.method.toUpperCase();
+            String bodyText = request.body == null ? "" : request.body;
+            boolean requiresBody =
+                "POST".equals(method) ||
+                "PUT".equals(method) ||
+                "PATCH".equals(method) ||
+                "PROPPATCH".equals(method) ||
+                "REPORT".equals(method);
+            RequestBody requestBody = null;
+            if (requiresBody || !bodyText.isEmpty()) {
+                MediaType mediaType = MediaType.parse(request.headers.get("Content-Type"));
+                requestBody = RequestBody.create(
+                    mediaType,
+                    bodyText.getBytes(StandardCharsets.UTF_8)
                 );
             }
-            if (inputStream != null) {
-                readResponseBytes(task, inputStream);
+            requestBuilder.method(method, requestBody);
+
+            Call call = httpClient.newCall(requestBuilder.build());
+            synchronized (task.lock) {
+                if (!STATE_RUNNING.equals(task.state)) {
+                    call.cancel();
+                    return;
+                }
+                task.call = call;
             }
-            if (isRunning(task)) {
-                endTask(task);
+
+            try (Response response = call.execute()) {
+                ResponseBody responseBody = response.body();
+                if (!response.isSuccessful()) {
+                    String detail = responseBody == null ? "" : readErrorBody(responseBody.byteStream());
+                    throw new IOException(
+                        "HTTP " + response.code() + (detail.isEmpty() ? "" : ": " + detail)
+                    );
+                }
+                if (responseBody != null) {
+                    readResponseBytes(task, responseBody.byteStream());
+                }
+                if (isRunning(task)) {
+                    endTask(task);
+                }
             }
         } catch (IOException error) {
             Log.e(TAG, "Stream " + task.id + " failed", error);
@@ -467,16 +481,16 @@ final class BackgroundStreamManager {
     }
 
     private void finishTask(StreamTask task) {
-        HttpURLConnection connection;
+        Call call;
         synchronized (task.lock) {
-            connection = task.connection;
-            task.connection = null;
+            call = task.call;
+            task.call = null;
             task.workerThread = null;
             // Drop credentials and request bodies as soon as the network operation finishes.
             task.request = null;
         }
-        if (connection != null) {
-            connection.disconnect();
+        if (call != null) {
+            call.cancel();
         }
         if (task.keepAlive) {
             BackgroundGenerationService.stop(appContext, task.id);
