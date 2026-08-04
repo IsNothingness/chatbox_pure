@@ -160,8 +160,8 @@ describe('native pull-backed stream', () => {
     expect(decoder.decode(second.value)).toBe('second')
     expect(terminal).toEqual({ value: undefined, done: true })
     expect(mocks.attachStream.mock.calls).toEqual([
-      [{ id: streamId, afterSequence: -1, maxChunks: 128, maxBytes: 256 * 1024 }],
-      [{ id: streamId, afterSequence: 0, maxChunks: 128, maxBytes: 256 * 1024 }],
+      [{ id: streamId, afterSequence: -1, maxChunks: 32, maxBytes: 64 * 1024 }],
+      [{ id: streamId, afterSequence: 0, maxChunks: 32, maxBytes: 64 * 1024 }],
     ])
   })
 
@@ -234,8 +234,8 @@ describe('native pull-backed stream', () => {
     expect(mocks.attachStream).toHaveBeenLastCalledWith({
       id: 'stream-1',
       afterSequence: 0,
-      maxChunks: 128,
-      maxBytes: 256 * 1024,
+      maxChunks: 32,
+      maxBytes: 64 * 1024,
     })
   })
 
@@ -335,5 +335,92 @@ describe('native pull-backed stream', () => {
 
     expect(new TextDecoder().decode(result.value)).toBe('only-on-resume')
     expect(mocks.attachStream).toHaveBeenCalledTimes(2)
+  })
+
+  test('replays a large background backlog in bounded pages without dropping chunks', async () => {
+    const totalChunks = 96
+    mocks.attachStream.mockImplementation(
+      ({
+        id,
+        afterSequence,
+        maxChunks,
+        maxBytes,
+      }: {
+        id: string
+        afterSequence: number
+        maxChunks: number
+        maxBytes: number
+      }) => {
+        const firstSequence = afterSequence + 1
+        const endSequence = Math.min(totalChunks, firstSequence + maxChunks)
+        return Promise.resolve({
+          id,
+          state: 'ended',
+          lastSequence: totalChunks - 1,
+          createdAt: 1,
+          chunks: Array.from({ length: endSequence - firstSequence }, (_, index) => ({
+            sequence: firstSequence + index,
+            chunk: `${firstSequence + index},`,
+          })),
+          hasMore: endSequence < totalChunks,
+          maxBytes,
+        })
+      }
+    )
+
+    const stream = createNativeReadableStream(
+      { url: 'https://example.com/stream', method: 'POST', headers: {}, body: '{}' },
+      {
+        keepAlive: true,
+        notificationTitle: 'Generating',
+        notificationBody: 'Please wait',
+        resumeStreamId: 'stream-1',
+      }
+    )
+    const reader = stream.getReader()
+    setRendererActive(true)
+
+    const decoder = new TextDecoder()
+    let received = ''
+    while (true) {
+      const result = await reader.read()
+      if (result.done) break
+      received += decoder.decode(result.value)
+    }
+
+    expect(received).toBe(Array.from({ length: totalChunks }, (_, index) => `${index},`).join(''))
+    expect(mocks.attachStream).toHaveBeenCalledTimes(3)
+    for (const [options] of mocks.attachStream.mock.calls) {
+      expect(options).toMatchObject({ maxChunks: 32, maxBytes: 64 * 1024 })
+    }
+  })
+
+  test('shrinks the bridge page and resumes after a transient snapshot failure', async () => {
+    mocks.attachStream.mockRejectedValueOnce(new Error('Capacitor bridge payload failed')).mockResolvedValue({
+      id: 'stream-1',
+      state: 'ended',
+      lastSequence: 0,
+      createdAt: 1,
+      chunks: [{ sequence: 0, chunk: 'recovered' }],
+      hasMore: false,
+    })
+
+    const stream = createNativeReadableStream(
+      { url: 'https://example.com/stream', method: 'POST', headers: {}, body: '{}' },
+      {
+        keepAlive: true,
+        notificationTitle: 'Generating',
+        notificationBody: 'Please wait',
+        resumeStreamId: 'stream-1',
+      }
+    )
+    const reader = stream.getReader()
+    setRendererActive(true)
+
+    const result = await reader.read()
+    await expect(reader.read()).resolves.toEqual({ value: undefined, done: true })
+    expect(new TextDecoder().decode(result.value)).toBe('recovered')
+    expect(mocks.attachStream.mock.calls[0][0]).toMatchObject({ maxBytes: 64 * 1024 })
+    expect(mocks.attachStream.mock.calls[1][0]).toMatchObject({ maxBytes: 32 * 1024 })
   })
 })

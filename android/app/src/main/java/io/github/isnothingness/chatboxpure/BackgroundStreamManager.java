@@ -287,22 +287,25 @@ final class BackgroundStreamManager {
     }
 
     void cancel(String id) {
-        StreamTask task = tasks.remove(id);
+        StreamTask task = tasks.get(id);
         if (task == null) {
             return;
         }
         HttpURLConnection connection;
         Thread workerThread;
         synchronized (task.lock) {
+            if (isTerminal(task.state)) {
+                return;
+            }
             connection = task.connection;
             workerThread = task.workerThread;
-            task.removed = true;
             task.request = null;
             task.connection = null;
             task.workerThread = null;
             task.error = "Cancelled";
             task.state = STATE_ERROR;
             task.terminalAt = System.currentTimeMillis();
+            task.terminalDurable = false;
         }
         if (connection != null) {
             connection.disconnect();
@@ -313,7 +316,10 @@ final class BackgroundStreamManager {
         if (task.keepAlive) {
             BackgroundGenerationService.stop(appContext, id);
         }
-        deletePersistedTask(id);
+        // Cancellation stops the upstream request but keeps every byte already received.
+        // The renderer can drain the durable tail and acknowledges the task only after
+        // the final chat message has been saved.
+        persistTaskNow(task);
     }
 
     private void runTask(StreamTask task) {

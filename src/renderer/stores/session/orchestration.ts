@@ -675,10 +675,11 @@ export async function orchestrateGeneration(
       }
 
       const shouldPersist = shouldPersistStreamingChunk(chunk.type, Date.now() - lastPersistTimestamp, persistInterval)
+      // The view model stays responsive even when serializing and writing a long
+      // session to SQLite takes longer than a rendering frame.
+      updateStreamingCache(sessionId, targetMsg)
       if (shouldPersist) {
         void persistStreamingMessage(sessionId, targetMsg)
-      } else {
-        updateStreamingCache(sessionId, targetMsg)
       }
       if (shouldPersist) {
         lastPersistTimestamp = Date.now()

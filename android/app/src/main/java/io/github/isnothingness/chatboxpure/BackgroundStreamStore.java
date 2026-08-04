@@ -153,7 +153,10 @@ final class BackgroundStreamStore extends SQLiteOpenHelper {
             );
             if (inserted == -1L) {
                 taskValues.remove("id");
-                database.update("stream_tasks", taskValues, "id = ?", new String[] { task.id });
+                int updated = database.update("stream_tasks", taskValues, "id = ?", new String[] { task.id });
+                if (updated != 1) {
+                    throw new IllegalStateException("Could not persist stream task " + task.id);
+                }
             }
 
             for (StoredChunk chunk : newChunks) {
@@ -162,12 +165,17 @@ final class BackgroundStreamStore extends SQLiteOpenHelper {
                 chunkValues.put("sequence", chunk.sequence);
                 chunkValues.put("payload", chunk.payload);
                 chunkValues.put("byte_count", chunk.byteCount);
-                database.insertWithOnConflict(
+                long chunkRow = database.insertWithOnConflict(
                     "stream_chunks",
                     null,
                     chunkValues,
                     SQLiteDatabase.CONFLICT_REPLACE
                 );
+                if (chunkRow == -1L) {
+                    throw new IllegalStateException(
+                        "Could not persist stream chunk " + task.id + ":" + chunk.sequence
+                    );
+                }
             }
             database.setTransactionSuccessful();
         } finally {
