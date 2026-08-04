@@ -25,6 +25,7 @@ import { AdaptiveSelect } from '@/components/AdaptiveSelect'
 import LazySlider from '@/components/common/LazySlider'
 import { languageNameMap, languages } from '@/i18n/locales'
 import {
+  configureGenerationDebugLogging,
   configureGenerationNotificationChannels,
   requestGenerationNotificationPermission,
 } from '@/native/stream-http'
@@ -827,11 +828,24 @@ enum ExportDataItem {
 
 const ExportLogsSection = () => {
   const { t } = useTranslation()
+  const generationDebugLoggingEnabled = useSettingsStore((state) => state.generationDebugLoggingEnabled)
+  const setSettings = useSettingsStore((state) => state.setSettings)
+  const [generationDebugLoggingForced, setGenerationDebugLoggingForced] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
   const [exportResult, setExportResult] = useState<{
     success: boolean
     error?: string
   } | null>(null)
+
+  useEffect(() => {
+    let mounted = true
+    void configureGenerationDebugLogging(generationDebugLoggingEnabled).then((status) => {
+      if (mounted) setGenerationDebugLoggingForced(status.forced)
+    })
+    return () => {
+      mounted = false
+    }
+  }, [generationDebugLoggingEnabled])
 
   const handleExportLogs = async () => {
     setIsExporting(true)
@@ -874,6 +888,27 @@ const ExportLogsSection = () => {
           )}
         </Text>
       </Stack>
+      {CHATBOX_BUILD_PLATFORM === 'android' && (
+        <Stack gap="xs">
+          <Switch
+            label={t('Generate generation diagnostic logs')}
+            checked={generationDebugLoggingForced || generationDebugLoggingEnabled}
+            disabled={generationDebugLoggingForced}
+            onChange={(event) =>
+              setSettings({
+                generationDebugLoggingEnabled: event.currentTarget.checked,
+              })
+            }
+          />
+          <Text size="xs" c="chatbox-tertiary">
+            {generationDebugLoggingForced
+              ? t('Debug builds always generate privacy-filtered diagnostic logs.')
+              : t(
+                  'Disabled by default. When enabled, privacy-filtered generation logs are written to Documents/ChatBox Pure/Logs. Disabling logging does not delete existing files.'
+                )}
+          </Text>
+        </Stack>
+      )}
       <Flex gap="md">
         <Button variant="primary" onClick={handleExportLogs} disabled={isExporting} loading={isExporting}>
           {isExporting ? t('Exporting...') : t('Export Logs')}

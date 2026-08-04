@@ -3,11 +3,15 @@ package io.github.isnothingness.chatboxpure;
 import android.content.ContentResolver;
 import android.content.ContentValues;
 import android.content.Context;
+import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
 import android.provider.MediaStore;
 import android.util.Log;
+
+import androidx.core.content.ContextCompat;
 
 import org.json.JSONObject;
 
@@ -27,14 +31,16 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * Debug-build-only JSONL diagnostics for the confirmed generation pipeline.
+ * Opt-in JSONL diagnostics for the confirmed generation pipeline.
  *
  * The event and field allowlists deliberately exclude request URLs, headers, bodies,
  * credentials and generated text. Identifiers are hashed before leaving the process.
+ * Debuggable builds force diagnostics on; release builds require explicit user consent.
  */
 final class GenerationDebugLog {
     private static final String TAG = "GenerationDebugLog";
-    private static final String DIRECTORY_NAME = "ChatBox Pure Debug";
+    private static final String PREFERENCES_NAME = "chatbox_pure_generation_diagnostics";
+    private static final String USER_ENABLED_KEY = "enabled";
     private static final ExecutorService WRITER = Executors.newSingleThreadExecutor();
     private static final Object FILE_LOCK = new Object();
     private static final Set<String> ALLOWED_EVENTS = new HashSet<>();
@@ -107,9 +113,43 @@ final class GenerationDebugLog {
 
     private GenerationDebugLog() {}
 
-    static boolean isEnabled(Context context) {
+    static boolean isDebugBuild(Context context) {
         return context != null &&
             (context.getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0;
+    }
+
+    static boolean isEnabled(Context context) {
+        if (context == null) return false;
+        if (
+            Build.VERSION.SDK_INT <= Build.VERSION_CODES.P &&
+            ContextCompat.checkSelfPermission(context, android.Manifest.permission.WRITE_EXTERNAL_STORAGE) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            return false;
+        }
+        if (isDebugBuild(context)) return true;
+        return preferences(context).getBoolean(USER_ENABLED_KEY, false);
+    }
+
+    static boolean configureUserEnabled(Context context, boolean enabled) {
+        if (context == null) return false;
+        SharedPreferences preferences = preferences(context);
+        boolean changed = preferences.getBoolean(USER_ENABLED_KEY, false) != enabled;
+        preferences.edit().putBoolean(USER_ENABLED_KEY, enabled).apply();
+        if (changed) {
+            synchronized (FILE_LOCK) {
+                mediaStoreUri = null;
+                legacyFile = null;
+                fileName = null;
+            }
+        }
+        return isEnabled(context);
+    }
+
+    private static SharedPreferences preferences(Context context) {
+        return context
+            .getApplicationContext()
+            .getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE);
     }
 
     static void event(Context context, String event, Map<String, ?> fields) {
@@ -161,6 +201,7 @@ final class GenerationDebugLog {
     }
 
     private static void write(Context context, String event, Map<String, Object> fields) {
+        if (!isEnabled(context)) return;
         try {
             JSONObject record = new JSONObject();
             record.put("timestamp", System.currentTimeMillis());
@@ -193,7 +234,7 @@ final class GenerationDebugLog {
             values.put(MediaStore.MediaColumns.MIME_TYPE, "application/json");
             values.put(
                 MediaStore.MediaColumns.RELATIVE_PATH,
-                Environment.DIRECTORY_DOCUMENTS + "/" + DIRECTORY_NAME
+                Environment.DIRECTORY_DOCUMENTS + "/" + directoryName(context)
             );
             ContentResolver resolver = context.getContentResolver();
             mediaStoreUri = resolver.insert(MediaStore.Files.getContentUri("external"), values);
@@ -202,7 +243,7 @@ final class GenerationDebugLog {
             }
         } else {
             File documents = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS);
-            File directory = new File(documents, DIRECTORY_NAME);
+            File directory = new File(documents, directoryName(context));
             if (!directory.exists() && !directory.mkdirs()) {
                 throw new IllegalStateException("Could not create debug log directory");
             }
@@ -218,5 +259,9 @@ final class GenerationDebugLog {
         }
         if (legacyFile == null) throw new IllegalStateException("Debug log target is unavailable");
         return new FileOutputStream(legacyFile, true);
+    }
+
+    private static String directoryName(Context context) {
+        return isDebugBuild(context) ? "ChatBox Pure Debug" : "ChatBox Pure/Logs";
     }
 }

@@ -249,6 +249,7 @@ describe('ZIP backup round trip', () => {
       keepGeneratingInBackground: true,
       notifyWhenGenerationCompletes: true,
       generationCompletionNotification: 'silent',
+      generationDebugLoggingEnabled: true,
       conversationListMenu: {
         pin: false,
         edit: true,
@@ -301,6 +302,7 @@ describe('ZIP backup round trip', () => {
       keepGeneratingInBackground: true,
       notifyWhenGenerationCompletes: true,
       generationCompletionNotification: 'silent',
+      generationDebugLoggingEnabled: true,
       conversationListMenu: {
         pin: false,
         edit: true,

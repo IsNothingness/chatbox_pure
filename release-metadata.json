@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "version": "1.4.0",
-  "publishedAt": "2026-08-02T17:07:58Z",
+  "version": "1.5.0",
+  "publishedAt": "2026-08-04T15:34:09Z",
   "releasePage": "https://github.com/IsNothingness/chatbox_pure/releases/latest",
   "packages": {
     "android": {
-      "url": "https://github.com/IsNothingness/chatbox_pure/releases/download/v1.4.0/ChatBox-Pure-1.4.0.apk",
-      "sha256": "c002beb268a422fdd6cfbc4ad4a3a7b667380a92cce9e684ef8b5245b9dce78a",
-      "size": 32996428
+      "url": "https://github.com/IsNothingness/chatbox_pure/releases/download/v1.5.0/ChatBox-Pure-1.5.0.apk",
+      "sha256": "629f9ae4793a500200f3dfafeb2ed52c1ed797f1c32addce2d2c24928bf34458",
+      "size": 32998597
     }
   }
 }

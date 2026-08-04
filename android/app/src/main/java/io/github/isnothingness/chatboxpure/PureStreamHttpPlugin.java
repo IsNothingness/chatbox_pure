@@ -24,7 +24,8 @@ import java.util.UUID;
 @CapacitorPlugin(
     name = "PureStreamHttp",
     permissions = {
-        @Permission(strings = { Manifest.permission.POST_NOTIFICATIONS }, alias = "notifications")
+        @Permission(strings = { Manifest.permission.POST_NOTIFICATIONS }, alias = "notifications"),
+        @Permission(strings = { Manifest.permission.WRITE_EXTERNAL_STORAGE }, alias = "generationLogs")
     }
 )
 public class PureStreamHttpPlugin extends Plugin {
@@ -191,6 +192,43 @@ public class PureStreamHttpPlugin extends Plugin {
         }
         GenerationDebugLog.event(getContext(), event, fields);
         call.resolve();
+    }
+
+    @PluginMethod
+    public void configureGenerationDebugLogging(PluginCall call) {
+        boolean requested = Boolean.TRUE.equals(call.getBoolean("enabled", false));
+        boolean wantsLogging = requested || GenerationDebugLog.isDebugBuild(getContext());
+        if (
+            wantsLogging &&
+            Build.VERSION.SDK_INT <= Build.VERSION_CODES.P &&
+            getPermissionState("generationLogs") != PermissionState.GRANTED
+        ) {
+            requestPermissionForAlias("generationLogs", call, "generationLogPermissionCallback");
+            return;
+        }
+        resolveGenerationDebugLogging(call, requested);
+    }
+
+    @PermissionCallback
+    private void generationLogPermissionCallback(PluginCall call) {
+        boolean requested = Boolean.TRUE.equals(call.getBoolean("enabled", false));
+        if (getPermissionState("generationLogs") != PermissionState.GRANTED) {
+            GenerationDebugLog.configureUserEnabled(getContext(), false);
+            JSObject result = new JSObject();
+            result.put("enabled", false);
+            result.put("forced", GenerationDebugLog.isDebugBuild(getContext()));
+            call.resolve(result);
+            return;
+        }
+        resolveGenerationDebugLogging(call, requested);
+    }
+
+    private void resolveGenerationDebugLogging(PluginCall call, boolean requested) {
+        boolean enabled = GenerationDebugLog.configureUserEnabled(getContext(), requested);
+        JSObject result = new JSObject();
+        result.put("enabled", enabled);
+        result.put("forced", GenerationDebugLog.isDebugBuild(getContext()));
+        call.resolve(result);
     }
 
     @PluginMethod

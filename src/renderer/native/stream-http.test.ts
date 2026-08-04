@@ -6,6 +6,9 @@ const mocks = vi.hoisted(() => ({
   acknowledgeStream: vi.fn(() => Promise.resolve()),
   attachStream: vi.fn(),
   cancelStream: vi.fn(() => Promise.resolve()),
+  configureGenerationDebugLogging: vi.fn((options: { enabled: boolean }) =>
+    Promise.resolve({ enabled: options.enabled, forced: false })
+  ),
   debugGenerationLog: vi.fn(() => Promise.resolve()),
   startStream: vi.fn((options: { id: string }) => Promise.resolve({ id: options.id })),
 }))
@@ -26,6 +29,7 @@ vi.mock('@capacitor/core', () => ({
     attachStream: mocks.attachStream,
     acknowledgeStream: mocks.acknowledgeStream,
     cancelStream: mocks.cancelStream,
+    configureGenerationDebugLogging: mocks.configureGenerationDebugLogging,
     debugGenerationLog: mocks.debugGenerationLog,
   })),
 }))
@@ -33,10 +37,16 @@ vi.mock('capacitor-stream-http', () => ({ StreamHttp: {} }))
 
 import {
   acknowledgeNativeStreams,
+  configureGenerationDebugLogging,
   createNativeReadableStream,
   hasActiveNativeStreamReader,
   wakeNativeStreamReaders,
 } from './stream-http'
+
+test('configures opt-in generation diagnostics through the native bridge', async () => {
+  await expect(configureGenerationDebugLogging(true)).resolves.toEqual({ enabled: true, forced: false })
+  expect(mocks.configureGenerationDebugLogging).toHaveBeenCalledWith({ enabled: true })
+})
 
 describe('native pull-backed stream', () => {
   let visibilityListener: (() => void) | undefined

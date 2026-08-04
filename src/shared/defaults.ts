@@ -95,6 +95,7 @@ export function settings(): Settings {
     // Keep the legacy boolean synchronized so older Pure builds can still read backups.
     notifyWhenGenerationCompletes: true,
     generationCompletionNotification: 'silent',
+    generationDebugLoggingEnabled: false,
 
     defaultPrompt: getDefaultPrompt(),
 

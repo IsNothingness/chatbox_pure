@@ -66,6 +66,7 @@ interface PureStreamHttpPlugin {
   acknowledgeStream(options: { id: string }): Promise<void>
   cancelStream(options: { id: string }): Promise<void>
   debugGenerationLog?(options: { event: string; fields?: Record<string, string | number | boolean> }): Promise<void>
+  configureGenerationDebugLogging?(options: { enabled: boolean }): Promise<{ enabled: boolean; forced: boolean }>
   requestNotificationPermission(): Promise<{ granted: boolean }>
   configureNotificationChannels(options: { mode: 'off' | 'silent' | 'normal' }): Promise<void>
   showCompletionNotification(options: { title: string; body: string; mode?: 'silent' | 'normal' }): Promise<void>
@@ -130,6 +131,23 @@ export async function configureGenerationNotificationChannels(mode: 'off' | 'sil
     await PureStreamHttp.configureNotificationChannels({ mode })
   } catch (error) {
     console.warn('Failed to configure generation notification channels:', error)
+  }
+}
+
+export interface GenerationDebugLoggingStatus {
+  enabled: boolean
+  forced: boolean
+}
+
+export async function configureGenerationDebugLogging(enabled: boolean): Promise<GenerationDebugLoggingStatus> {
+  if (CHATBOX_BUILD_PLATFORM !== 'android' || !PureStreamHttp.configureGenerationDebugLogging) {
+    return { enabled: false, forced: false }
+  }
+  try {
+    return await PureStreamHttp.configureGenerationDebugLogging({ enabled })
+  } catch (error) {
+    console.warn('Failed to configure generation diagnostic logging:', error)
+    return { enabled: false, forced: false }
   }
 }
 
