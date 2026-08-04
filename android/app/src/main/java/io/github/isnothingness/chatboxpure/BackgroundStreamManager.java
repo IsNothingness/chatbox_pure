@@ -125,6 +125,10 @@ final class BackgroundStreamManager {
         boolean started;
         boolean removed;
         boolean completionNotified;
+        long lastSnapshotAfterSequence = Long.MIN_VALUE;
+        int repeatedSnapshotCount;
+        long lastSnapshotLogAt;
+        long lastProgressLogAt;
 
         StreamTask(
             String id,
@@ -441,12 +445,16 @@ final class BackgroundStreamManager {
             task.bufferedBytes += chunkBytes;
             task.chunks.add(new ChunkRecord(sequence, chunk));
         }
-        Map<String, Object> fields = new HashMap<>();
-        fields.put("streamId", task.id);
-        fields.put("sequence", sequence);
-        fields.put("chunkBytes", chunkBytes);
-        fields.put("totalBytes", task.bufferedBytes);
-        GenerationDebugLog.event(appContext, "native_chunk", fields);
+        long now = System.currentTimeMillis();
+        if (sequence == 0 || sequence % 64 == 0 || now - task.lastProgressLogAt >= 5000L) {
+            task.lastProgressLogAt = now;
+            Map<String, Object> fields = new HashMap<>();
+            fields.put("streamId", task.id);
+            fields.put("sequence", sequence);
+            fields.put("chunkBytes", chunkBytes);
+            fields.put("totalBytes", task.bufferedBytes);
+            GenerationDebugLog.event(appContext, "native_progress", fields);
+        }
     }
 
     private void endTask(StreamTask task) {
@@ -539,14 +547,39 @@ final class BackgroundStreamManager {
                 hasMore
             );
             if (afterSequence != Long.MAX_VALUE && (!selected.isEmpty() || isTerminal(task.state))) {
+                long now = System.currentTimeMillis();
+                boolean cursorAdvanced = afterSequence != task.lastSnapshotAfterSequence;
+                if (cursorAdvanced) {
+                    task.lastSnapshotAfterSequence = afterSequence;
+                    task.repeatedSnapshotCount = 0;
+                } else {
+                    task.repeatedSnapshotCount += 1;
+                }
+                boolean firstForCursor = cursorAdvanced;
+                boolean stalled = task.repeatedSnapshotCount >= 3 &&
+                    now - task.lastSnapshotLogAt >= 5000L;
+                if (!firstForCursor && !stalled) {
+                    return snapshot;
+                }
+                task.lastSnapshotLogAt = now;
                 Map<String, Object> fields = new HashMap<>();
                 fields.put("streamId", task.id);
                 fields.put("state", task.state);
+                fields.put("afterSequence", afterSequence);
+                if (!selected.isEmpty()) {
+                    fields.put("firstSequence", selected.get(0).sequence);
+                    fields.put("returnedThrough", selected.get(selected.size() - 1).sequence);
+                }
                 fields.put("lastSequence", task.nextSequence - 1);
                 fields.put("chunkCount", selected.size());
                 fields.put("batchBytes", selectedBytes);
                 fields.put("hasMore", hasMore);
-                GenerationDebugLog.event(appContext, "snapshot_read", fields);
+                fields.put("repeatCount", task.repeatedSnapshotCount);
+                GenerationDebugLog.event(
+                    appContext,
+                    stalled ? "snapshot_stalled" : "snapshot_read",
+                    fields
+                );
             }
             return snapshot;
         }

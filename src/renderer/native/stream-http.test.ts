@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   acknowledgeStream: vi.fn(() => Promise.resolve()),
   attachStream: vi.fn(),
   cancelStream: vi.fn(() => Promise.resolve()),
+  debugGenerationLog: vi.fn(() => Promise.resolve()),
   startStream: vi.fn((options: { id: string }) => Promise.resolve({ id: options.id })),
 }))
 
@@ -25,6 +26,7 @@ vi.mock('@capacitor/core', () => ({
     attachStream: mocks.attachStream,
     acknowledgeStream: mocks.acknowledgeStream,
     cancelStream: mocks.cancelStream,
+    debugGenerationLog: mocks.debugGenerationLog,
   })),
 }))
 vi.mock('capacitor-stream-http', () => ({ StreamHttp: {} }))
@@ -192,6 +194,33 @@ describe('native pull-backed stream', () => {
 
     expect(result.done).toBe(false)
     expect([...(result.value ?? new Uint8Array())]).toEqual([255, 0, 10, 128])
+  })
+
+  test('normalizes numeric sequence values crossing the Capacitor JSON bridge', async () => {
+    mocks.attachStream.mockResolvedValue({
+      id: 'stream-1',
+      state: 'ended',
+      lastSequence: 0,
+      createdAt: 1,
+      chunks: [{ sequence: '0' as unknown as number, chunk: 'bridged' }],
+      hasMore: false,
+    })
+
+    const stream = createNativeReadableStream(
+      { url: 'https://example.com/stream', method: 'POST', headers: {}, body: '{}' },
+      {
+        keepAlive: true,
+        notificationTitle: 'Generating',
+        notificationBody: 'Please wait',
+        resumeStreamId: 'stream-1',
+      }
+    )
+    const reader = stream.getReader()
+    setRendererActive(true)
+
+    const result = await reader.read()
+    await expect(reader.read()).resolves.toEqual({ value: undefined, done: true })
+    expect(new TextDecoder().decode(result.value)).toBe('bridged')
   })
 
   test('stops polling in the background and immediately resumes from the last cursor', async () => {

@@ -65,7 +65,7 @@ interface PureStreamHttpPlugin {
   listStreams(): Promise<{ streams: NativeStreamTask[] }>
   acknowledgeStream(options: { id: string }): Promise<void>
   cancelStream(options: { id: string }): Promise<void>
-  debugGenerationLog(options: { event: string; fields?: Record<string, string | number | boolean> }): Promise<void>
+  debugGenerationLog?(options: { event: string; fields?: Record<string, string | number | boolean> }): Promise<void>
   requestNotificationPermission(): Promise<{ granted: boolean }>
   configureNotificationChannels(options: { mode: 'off' | 'silent' | 'normal' }): Promise<void>
   showCompletionNotification(options: { title: string; body: string; mode?: 'silent' | 'normal' }): Promise<void>
@@ -184,7 +184,7 @@ export function writeGenerationDebugLog(
   event: string,
   fields: Record<string, string | number | boolean | undefined> = {}
 ): void {
-  if (CHATBOX_BUILD_PLATFORM !== 'android') return
+  if (CHATBOX_BUILD_PLATFORM !== 'android' || !PureStreamHttp.debugGenerationLog) return
   const definedFields = Object.fromEntries(
     Object.entries(fields).filter((entry): entry is [string, string | number | boolean] => entry[1] !== undefined)
   )
@@ -238,6 +238,8 @@ function createPureAndroidReadableStream(
   let terminalSnapshot: { state: 'ended' | 'error' | 'cancelled'; lastSequence: number; error?: string } | null = null
   let pullMaxBytes = DEFAULT_PULL_BYTES
   let consecutivePullFailures = 0
+  let consecutiveCursorStalls = 0
+  let lastCursorStallLogAt = 0
   let activeController: ReadableStreamDefaultController<Uint8Array> | null = null
   let registeredStreamId: string | null = null
 
@@ -271,6 +273,15 @@ function createPureAndroidReadableStream(
 
   const settle = (controller: ReadableStreamDefaultController<Uint8Array>, type: 'end' | 'error', error?: string) => {
     if (streamSettled) return
+    writeGenerationDebugLog('bridge_reader_completed', {
+      streamId,
+      state: type,
+      afterSequence: nativeReadThrough,
+      returnedThrough: expectedSequence - 1,
+      pendingChunks: pendingChunks.size,
+      pendingBytes,
+      errorType: error ? 'native_stream_error' : undefined,
+    })
     streamSettled = true
     activeController = null
     cleanup()
@@ -318,15 +329,21 @@ function createPureAndroidReadableStream(
   }
 
   const acceptChunk = (sequence: number, chunk: NativeStreamChunk) => {
-    if (sequence <= nativeReadThrough) return
-    if (sequence !== nativeReadThrough + 1) {
-      console.warn(`Native stream ${streamId} returned a non-contiguous chunk at ${sequence}`)
-      return
+    const normalizedSequence = Number(sequence)
+    if (!Number.isSafeInteger(normalizedSequence) || normalizedSequence < 0) {
+      console.warn(`Native stream ${streamId} returned an invalid chunk sequence`, sequence)
+      return false
+    }
+    if (normalizedSequence <= nativeReadThrough) return false
+    if (normalizedSequence !== nativeReadThrough + 1) {
+      console.warn(`Native stream ${streamId} returned a non-contiguous chunk at ${normalizedSequence}`)
+      return false
     }
     const bytes = chunk.chunkBase64 ? decodeBase64(chunk.chunkBase64) : textEncoder.encode(chunk.chunk || '')
-    pendingChunks.set(sequence, bytes)
+    pendingChunks.set(normalizedSequence, bytes)
     pendingBytes += bytes.byteLength
-    nativeReadThrough = sequence
+    nativeReadThrough = normalizedSequence
+    return true
   }
 
   const hasPendingCapacity = () => {
@@ -382,6 +399,11 @@ function createPureAndroidReadableStream(
     unregisterReader()
     registeredStreamId = streamId
     activeNativeStreamReaders.set(streamId, { wake: wakeReader })
+    writeGenerationDebugLog('bridge_reader_started', {
+      streamId,
+      afterSequence: nativeReadThrough,
+      expectedSequence,
+    })
   }
 
   const pullSnapshot = async () => {
@@ -397,10 +419,12 @@ function createPureAndroidReadableStream(
     let receivedChunks = false
     let hasMoreBacklog = false
     let pullFailed = false
+    let cursorStalled = false
     try {
+      const requestedAfterSequence = nativeReadThrough
       const snapshot = await PureStreamHttp.attachStream({
         id: streamId,
-        afterSequence: nativeReadThrough,
+        afterSequence: requestedAfterSequence,
         maxChunks: MAX_PULL_CHUNKS,
         maxBytes: pullMaxBytes,
       })
@@ -417,8 +441,41 @@ function createPureAndroidReadableStream(
           error: snapshot.error,
         }
       }
+      let acceptedChunks = 0
       for (const record of snapshot.chunks) {
-        acceptChunk(record.sequence, record)
+        if (acceptChunk(record.sequence, record)) acceptedChunks += 1
+      }
+      cursorStalled = snapshot.chunks.length > 0 && acceptedChunks === 0
+      if (cursorStalled) {
+        consecutiveCursorStalls += 1
+        const now = Date.now()
+        if (consecutiveCursorStalls === 1 || now - lastCursorStallLogAt >= 5000) {
+          lastCursorStallLogAt = now
+          writeGenerationDebugLog('bridge_cursor_stalled', {
+            streamId,
+            state: snapshot.state,
+            afterSequence: requestedAfterSequence,
+            firstSequence: Number(snapshot.chunks[0]?.sequence),
+            returnedThrough: Number(snapshot.chunks.at(-1)?.sequence),
+            lastSequence: snapshot.lastSequence,
+            chunkCount: snapshot.chunks.length,
+            repeatCount: consecutiveCursorStalls,
+          })
+        }
+      } else if (acceptedChunks > 0) {
+        consecutiveCursorStalls = 0
+        writeGenerationDebugLog('bridge_snapshot_received', {
+          streamId,
+          state: snapshot.state,
+          afterSequence: requestedAfterSequence,
+          firstSequence: Number(snapshot.chunks[0]?.sequence),
+          returnedThrough: nativeReadThrough,
+          lastSequence: snapshot.lastSequence,
+          chunkCount: acceptedChunks,
+          hasMore: snapshot.hasMore,
+          pendingChunks: pendingChunks.size,
+          pendingBytes,
+        })
       }
       flush(controller)
 
@@ -444,11 +501,13 @@ function createPureAndroidReadableStream(
         schedulePull(
           pullFailed
             ? retryDelay
-            : pullRequested || hasMoreBacklog
-              ? 0
-              : receivedChunks
-                ? ACTIVE_PULL_INTERVAL_MS
-                : IDLE_PULL_INTERVAL_MS
+            : cursorStalled
+              ? Math.min(MAX_PULL_RETRY_DELAY_MS, IDLE_PULL_INTERVAL_MS * 2 ** Math.min(3, consecutiveCursorStalls))
+              : pullRequested || hasMoreBacklog
+                ? 0
+                : receivedChunks
+                  ? ACTIVE_PULL_INTERVAL_MS
+                  : IDLE_PULL_INTERVAL_MS
         )
       }
     }
@@ -524,6 +583,13 @@ function createPureAndroidReadableStream(
       schedulePull(0)
     },
     cancel: async () => {
+      writeGenerationDebugLog('bridge_reader_cancelled', {
+        streamId,
+        afterSequence: nativeReadThrough,
+        returnedThrough: expectedSequence - 1,
+        pendingChunks: pendingChunks.size,
+        pendingBytes,
+      })
       try {
         await PureStreamHttp.cancelStream({ id: streamId })
       } finally {

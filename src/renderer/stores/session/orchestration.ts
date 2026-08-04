@@ -13,7 +13,6 @@ import type {
 import { getMessageText } from '@shared/utils/message'
 import type { ModelMessage, ToolSet } from 'ai'
 import { createModel, createModelDependencies } from '@/adapters'
-import i18n from '@/i18n'
 import {
   type AgentModeEntrySource,
   captureAgentModeException,
@@ -21,6 +20,7 @@ import {
   trackAgentModeSuggested,
   trackWorkModeSuggestionDecision,
 } from '@/analytics/agent-mode'
+import i18n from '@/i18n'
 import {
   isNativeGenerationStopRequested,
   registerNativeGenerationContext,
@@ -726,6 +726,11 @@ export async function orchestrateGeneration(
       },
     }
 
+    writeGenerationDebugLog('generation_stream_started', {
+      sessionId,
+      messageId: targetMsg.id,
+      durationMs: Date.now() - startTime,
+    })
     for await (const chunk of stream) {
       const result = await processStreamChunk(chunk, processorState, streamCallbacks)
       processorState = result.state
@@ -773,6 +778,15 @@ export async function orchestrateGeneration(
         })
       }
     }
+    writeGenerationDebugLog('generation_stream_completed', {
+      sessionId,
+      messageId: targetMsg.id,
+      contentChars: getMessageText(targetMsg, true, true).length,
+      contentParts: processorState.contentParts.length,
+      durationMs: Date.now() - startTime,
+      stopRequested: isNativeGenerationStopRequested(controller.signal),
+      finishReasonPresent: Boolean(processorState.finishReason),
+    })
 
     if (processorState.contentParts.some((part) => part.type === 'tool-call' && part.state === 'paused')) {
       targetMsg = {

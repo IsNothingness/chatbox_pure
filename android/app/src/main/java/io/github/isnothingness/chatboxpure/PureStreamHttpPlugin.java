@@ -111,7 +111,10 @@ public class PureStreamHttpPlugin extends Plugin {
     @PluginMethod
     public void attachStream(PluginCall call) {
         String streamId = call.getString("id");
-        long afterSequence = call.getLong("afterSequence", -1L);
+        // Capacitor decodes ordinary JavaScript integer values as Integer. PluginCall#getLong
+        // only accepts values that are already Long, so using it here silently reset every
+        // cursor to -1 and repeatedly returned the first page of a completed stream.
+        long afterSequence = call.getInt("afterSequence", -1);
         int maxChunks = Math.max(1, Math.min(512, call.getInt("maxChunks", 128)));
         int maxBytes = Math.max(32 * 1024, Math.min(1024 * 1024, call.getInt("maxBytes", 256 * 1024)));
         if (streamId == null) {
