@@ -7,6 +7,9 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -14,20 +17,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-
-import okhttp3.Call;
-import okhttp3.MediaType;
-import okhttp3.OkHttpClient;
-import okhttp3.Request;
-import okhttp3.RequestBody;
-import okhttp3.Response;
-import okhttp3.ResponseBody;
 
 /**
  * Process-scoped owner for model response streams.
@@ -48,14 +42,6 @@ final class BackgroundStreamManager {
     private static final long TERMINAL_RETENTION_MS = 60L * 60L * 1000L;
     private static final long PERSIST_DEBOUNCE_MS = 250L;
     private static volatile BackgroundStreamManager instance;
-
-    interface Observer {
-        void onChunk(String id, long sequence, byte[] chunk);
-
-        void onEnd(String id, long lastSequence);
-
-        void onError(String id, long lastSequence, String error);
-    }
 
     static final class StreamRequest {
         final String url;
@@ -132,7 +118,7 @@ final class BackgroundStreamManager {
         final List<ChunkRecord> chunks = new ArrayList<>();
 
         StreamRequest request;
-        Call call;
+        HttpURLConnection connection;
         Thread workerThread;
         String state = STATE_PENDING;
         String error;
@@ -198,22 +184,13 @@ final class BackgroundStreamManager {
 
     private final Context appContext;
     private final BackgroundStreamStore persistenceStore;
-    private final OkHttpClient httpClient;
     private final Map<String, StreamTask> tasks = new ConcurrentHashMap<>();
-    private final CopyOnWriteArraySet<Observer> observers = new CopyOnWriteArraySet<>();
     private final ExecutorService executor = Executors.newCachedThreadPool();
     private final ScheduledExecutorService persistenceExecutor = Executors.newSingleThreadScheduledExecutor();
 
     private BackgroundStreamManager(Context context) {
         appContext = context.getApplicationContext();
         persistenceStore = new BackgroundStreamStore(appContext);
-        httpClient = new OkHttpClient.Builder()
-            .connectTimeout(30, TimeUnit.SECONDS)
-            .writeTimeout(30, TimeUnit.SECONDS)
-            // Long reasoning streams may legitimately remain silent for a while.
-            .readTimeout(0, TimeUnit.MILLISECONDS)
-            .retryOnConnectionFailure(false)
-            .build();
         loadPersistedTasks();
     }
 
@@ -294,14 +271,6 @@ final class BackgroundStreamManager {
         return snapshots;
     }
 
-    void addObserver(Observer observer) {
-        observers.add(observer);
-    }
-
-    void removeObserver(Observer observer) {
-        observers.remove(observer);
-    }
-
     void acknowledge(String id) {
         StreamTask task = tasks.get(id);
         if (task == null) {
@@ -318,28 +287,25 @@ final class BackgroundStreamManager {
     }
 
     void cancel(String id) {
-        StreamTask task = tasks.get(id);
+        StreamTask task = tasks.remove(id);
         if (task == null) {
             return;
         }
-        Call call;
+        HttpURLConnection connection;
         Thread workerThread;
         synchronized (task.lock) {
-            if (isTerminal(task.state)) {
-                return;
-            }
-            call = task.call;
+            connection = task.connection;
             workerThread = task.workerThread;
+            task.removed = true;
             task.request = null;
-            task.call = null;
+            task.connection = null;
             task.workerThread = null;
             task.error = "Cancelled";
             task.state = STATE_ERROR;
             task.terminalAt = System.currentTimeMillis();
-            task.terminalDurable = false;
         }
-        if (call != null) {
-            call.cancel();
+        if (connection != null) {
+            connection.disconnect();
         }
         if (workerThread != null) {
             workerThread.interrupt();
@@ -347,15 +313,7 @@ final class BackgroundStreamManager {
         if (task.keepAlive) {
             BackgroundGenerationService.stop(appContext, id);
         }
-        // Cancellation stops the upstream request but keeps every byte already received.
-        // The renderer can drain the durable tail and acknowledges the task only after
-        // the final chat message has been saved.
-        persistTaskNow(task);
-        long lastSequence;
-        synchronized (task.lock) {
-            lastSequence = task.nextSequence - 1;
-        }
-        notifyError(task.id, lastSequence, "Cancelled");
+        deletePersistedTask(id);
     }
 
     private void runTask(StreamTask task) {
@@ -371,77 +329,54 @@ final class BackgroundStreamManager {
         }
 
         try {
-            Request.Builder requestBuilder = new Request.Builder().url(request.url);
-            for (Map.Entry<String, String> header : request.headers.entrySet()) {
-                requestBuilder.header(header.getKey(), header.getValue());
+            URL url = new URL(request.url);
+            HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+            synchronized (task.lock) {
+                task.connection = connection;
             }
 
-            String method = request.method.toUpperCase();
-            String bodyText = request.body == null ? "" : request.body;
-            boolean requiresBody =
-                "POST".equals(method) ||
-                "PUT".equals(method) ||
-                "PATCH".equals(method) ||
-                "PROPPATCH".equals(method) ||
-                "REPORT".equals(method);
-            RequestBody requestBody = null;
-            if (requiresBody || !bodyText.isEmpty()) {
-                String contentType = null;
-                for (Map.Entry<String, String> header : request.headers.entrySet()) {
-                    if ("Content-Type".equalsIgnoreCase(header.getKey())) {
-                        contentType = header.getValue();
-                        break;
-                    }
+            connection.setRequestMethod(request.method);
+            for (Map.Entry<String, String> header : request.headers.entrySet()) {
+                connection.setRequestProperty(header.getKey(), header.getValue());
+            }
+            connection.setConnectTimeout(30_000);
+            // Model streams can remain silent while reasoning. Cancellation still disconnects.
+            connection.setReadTimeout(0);
+            connection.setUseCaches(false);
+            connection.setDoInput(true);
+
+            if (
+                request.body != null &&
+                !request.body.isEmpty() &&
+                !"GET".equalsIgnoreCase(request.method)
+            ) {
+                byte[] requestBody = request.body.getBytes(StandardCharsets.UTF_8);
+                connection.setDoOutput(true);
+                // Sending a fixed-length JSON body avoids gateway incompatibilities with
+                // chunked request uploads. The response itself remains streamed.
+                connection.setFixedLengthStreamingMode(requestBody.length);
+                try (OutputStream output = connection.getOutputStream()) {
+                    output.write(requestBody);
                 }
-                MediaType mediaType = MediaType.parse(contentType);
-                requestBody = RequestBody.create(
-                    mediaType,
-                    bodyText.getBytes(StandardCharsets.UTF_8)
+            }
+
+            int responseCode = connection.getResponseCode();
+            boolean successful = responseCode >= 200 && responseCode < 300;
+            InputStream inputStream = successful ? connection.getInputStream() : connection.getErrorStream();
+            if (!successful) {
+                String detail = inputStream == null ? "" : readErrorBody(inputStream);
+                throw new IOException(
+                    "HTTP " + responseCode + (detail.isEmpty() ? "" : ": " + detail)
                 );
             }
-            requestBuilder.method(method, requestBody);
-
-            Call call = httpClient.newCall(requestBuilder.build());
-            synchronized (task.lock) {
-                if (!STATE_RUNNING.equals(task.state)) {
-                    call.cancel();
-                    return;
-                }
-                task.call = call;
+            if (inputStream != null) {
+                readResponseBytes(task, inputStream);
             }
-
-            try (Response response = call.execute()) {
-                ResponseBody responseBody = response.body();
-                if (!response.isSuccessful()) {
-                    String detail = responseBody == null ? "" : readErrorBody(responseBody.byteStream());
-                    throw new IOException(
-                        "HTTP " + response.code() + (detail.isEmpty() ? "" : ": " + detail)
-                    );
-                }
-                if (responseBody != null) {
-                    readResponseBytes(task, responseBody.byteStream());
-                }
-                if (isRunning(task)) {
-                    endTask(task);
-                }
+            if (isRunning(task)) {
+                endTask(task);
             }
         } catch (IOException error) {
             Log.e(TAG, "Stream " + task.id + " failed", error);
-            if (isRunning(task)) {
-                failTask(task, error);
-            }
-        } catch (RuntimeException error) {
-            // Request construction and transport adapters may reject malformed or
-            // unsupported inputs with unchecked exceptions. Never let an executor
-            // thread's uncaught exception terminate the whole Android process.
-            Log.e(TAG, "Stream " + task.id + " crashed", error);
-            if (isRunning(task)) {
-                failTask(task, error);
-            }
-        } catch (LinkageError error) {
-            // A transport dependency mismatch is a task failure, not a reason to
-            // kill the app process and strand the persisted stream as "running".
-            Log.e(TAG, "Stream transport could not be loaded for " + task.id, error);
             if (isRunning(task)) {
                 failTask(task, error);
             }
@@ -496,12 +431,10 @@ final class BackgroundStreamManager {
             task.bufferedBytes += chunkBytes;
             task.chunks.add(new ChunkRecord(sequence, chunk));
         }
-        notifyChunk(task.id, sequence, chunk);
         persistTaskSoon(task);
     }
 
     private void endTask(StreamTask task) {
-        long lastSequence;
         synchronized (task.lock) {
             if (!STATE_RUNNING.equals(task.state)) {
                 return;
@@ -509,15 +442,12 @@ final class BackgroundStreamManager {
             task.state = STATE_ENDED;
             task.terminalAt = System.currentTimeMillis();
             task.terminalDurable = false;
-            lastSequence = task.nextSequence - 1;
         }
         persistTaskNow(task);
-        notifyEnd(task.id, lastSequence);
     }
 
-    private void failTask(StreamTask task, Throwable error) {
+    private void failTask(StreamTask task, IOException error) {
         String message = error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage();
-        long lastSequence;
         synchronized (task.lock) {
             if (!STATE_RUNNING.equals(task.state)) {
                 return;
@@ -526,53 +456,21 @@ final class BackgroundStreamManager {
             task.error = message;
             task.terminalAt = System.currentTimeMillis();
             task.terminalDurable = false;
-            lastSequence = task.nextSequence - 1;
         }
         persistTaskNow(task);
-        notifyError(task.id, lastSequence, message);
-    }
-
-    private void notifyError(String id, long lastSequence, String error) {
-        for (Observer observer : observers) {
-            try {
-                observer.onError(id, lastSequence, error);
-            } catch (RuntimeException observerError) {
-                Log.w(TAG, "Could not deliver stream error event for " + id, observerError);
-            }
-        }
-    }
-
-    private void notifyChunk(String id, long sequence, byte[] chunk) {
-        for (Observer observer : observers) {
-            try {
-                observer.onChunk(id, sequence, chunk);
-            } catch (RuntimeException observerError) {
-                Log.w(TAG, "Could not deliver stream chunk event for " + id, observerError);
-            }
-        }
-    }
-
-    private void notifyEnd(String id, long lastSequence) {
-        for (Observer observer : observers) {
-            try {
-                observer.onEnd(id, lastSequence);
-            } catch (RuntimeException observerError) {
-                Log.w(TAG, "Could not deliver stream end event for " + id, observerError);
-            }
-        }
     }
 
     private void finishTask(StreamTask task) {
-        Call call;
+        HttpURLConnection connection;
         synchronized (task.lock) {
-            call = task.call;
-            task.call = null;
+            connection = task.connection;
+            task.connection = null;
             task.workerThread = null;
             // Drop credentials and request bodies as soon as the network operation finishes.
             task.request = null;
         }
-        if (call != null) {
-            call.cancel();
+        if (connection != null) {
+            connection.disconnect();
         }
         if (task.keepAlive) {
             BackgroundGenerationService.stop(appContext, task.id);

@@ -24,13 +24,7 @@ import { updateSession as updateSessionStore, useSession } from '@/stores/chatSt
 import { applyChatboxLicenseDefaultModelToSession } from '@/stores/defaultChatModel'
 import { lastUsedModelStore } from '@/stores/lastUsedModelStore'
 import * as scrollActions from '@/stores/scrollActions'
-import {
-  modifyMessage,
-  removeCurrentThread,
-  startNewThread,
-  stopActiveGeneration,
-  submitNewUserMessage,
-} from '@/stores/sessionActions'
+import { modifyMessage, removeCurrentThread, startNewThread, submitNewUserMessage } from '@/stores/sessionActions'
 import { getAllMessageList } from '@/stores/sessionHelpers'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useUIStore } from '@/stores/uiStore'
@@ -91,7 +85,7 @@ function RouteComponent() {
     })
   }, [currentSession, hasExpiredLicense, licenseDetail, licenseKey, licensePlanName])
   const lastGeneratingMessage = useMemo(
-    () => [...currentMessageList].reverse().find((m: Message) => m.generating),
+    () => currentMessageList.find((m: Message) => m.generating),
     [currentMessageList]
   )
 
@@ -212,17 +206,9 @@ function RouteComponent() {
     if (!currentSession) {
       return false
     }
-    if (stopActiveGeneration(currentSession.id)) {
-      return true
-    }
     if (lastGeneratingMessage?.generating) {
-      if (lastGeneratingMessage.cancel) {
-        // Native streams use a two-phase stop: stop receiving first, then drain
-        // and persist the durable tail before the orchestration clears generating.
-        lastGeneratingMessage.cancel()
-      } else {
-        void modifyMessage(currentSession.id, { ...lastGeneratingMessage, generating: false }, true)
-      }
+      lastGeneratingMessage?.cancel?.()
+      void modifyMessage(currentSession.id, { ...lastGeneratingMessage, generating: false }, true)
     }
     return true
   }, [currentSession, lastGeneratingMessage])

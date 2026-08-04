@@ -14,7 +14,7 @@
  * - Export (1): Export functionality
  */
 
-export { stopActiveGeneration } from './active-generation'
+export { createAttachmentResolver } from './attachment-resolver'
 export {
   createDefaultAgentModeEntry,
   getSessionAgentModeEntry,
@@ -23,7 +23,6 @@ export {
   setSessionAgentMode,
   useSessionAgentMode,
 } from './agent-mode'
-export { createAttachmentResolver } from './attachment-resolver'
 // CRUD operations (8 functions)
 export {
   clear,

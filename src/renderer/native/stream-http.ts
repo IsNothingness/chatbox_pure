@@ -50,7 +50,6 @@ interface PureStreamEvent {
   id: string
   sequence?: number
   lastSequence?: number
-  chunkBase64?: string
   chunk?: string
   error?: string
 }
@@ -67,7 +66,9 @@ interface PureStreamHttpPlugin {
   acknowledgeStream(options: { id: string }): Promise<void>
   cancelStream(options: { id: string }): Promise<void>
   requestNotificationPermission(): Promise<{ granted: boolean }>
-  configureNotificationChannels(options: { mode: 'off' | 'silent' | 'normal' }): Promise<void>
+  configureNotificationChannels(options: {
+    mode: 'off' | 'silent' | 'normal'
+  }): Promise<void>
   showCompletionNotification(options: { title: string; body: string; mode?: 'silent' | 'normal' }): Promise<void>
   addListener(
     eventName: 'chunk' | 'end' | 'error',
@@ -197,12 +198,6 @@ interface BackgroundStreamOptions {
 
 const ACTIVE_PULL_INTERVAL_MS = 50
 const IDLE_PULL_INTERVAL_MS = 120
-const MAX_PULL_CHUNKS = 32
-const DEFAULT_PULL_BYTES = 64 * 1024
-const MIN_PULL_BYTES = 32 * 1024
-const MAX_PULL_RETRY_DELAY_MS = 1000
-const MAX_PENDING_CHUNKS = 256
-const MAX_PENDING_BYTES = 1024 * 1024
 
 function createPureAndroidReadableStream(
   options: StartStreamOptions,
@@ -210,9 +205,6 @@ function createPureAndroidReadableStream(
 ): ReadableStream<Uint8Array> {
   let streamId = background?.resumeStreamId || createStreamId()
   let removeAppState: (() => void) | null = null
-  let removeChunk: (() => void) | null = null
-  let removeEnd: (() => void) | null = null
-  let removeError: (() => void) | null = null
   let pullTimer: ReturnType<typeof setTimeout> | null = null
   let pullInFlight = false
   let pullRequested = false
@@ -223,11 +215,6 @@ function createPureAndroidReadableStream(
   const textEncoder = new TextEncoder()
   const pendingChunks = new Map<number, Uint8Array>()
   let expectedSequence = 0
-  let nativeReadThrough = -1
-  let pendingBytes = 0
-  let terminalSnapshot: { state: 'ended' | 'error'; lastSequence: number; error?: string } | null = null
-  let pullMaxBytes = DEFAULT_PULL_BYTES
-  let consecutivePullFailures = 0
   let activeController: ReadableStreamDefaultController<Uint8Array> | null = null
   let registeredStreamId: string | null = null
 
@@ -256,12 +243,6 @@ function createPureAndroidReadableStream(
     }
     removeAppState?.()
     removeAppState = null
-    removeChunk?.()
-    removeEnd?.()
-    removeError?.()
-    removeChunk = null
-    removeEnd = null
-    removeError = null
     document.removeEventListener('visibilitychange', handleVisibilityChange)
   }
 
@@ -278,31 +259,15 @@ function createPureAndroidReadableStream(
     }
   }
 
-  const finishIfReady = (controller: ReadableStreamDefaultController<Uint8Array>) => {
-    if (!terminalSnapshot || expectedSequence <= terminalSnapshot.lastSequence) return false
-    const terminal = terminalSnapshot
-    const gracefulCancellation = terminal.state === 'error' && terminal.error === 'Cancelled'
-    // controller.error() discards chunks already queued inside ReadableStream. Wait
-    // until downstream asks for more before surfacing a real transport error.
-    if (terminal.state === 'error' && !gracefulCancellation && (controller.desiredSize ?? 0) <= 0) {
-      return false
-    }
-    terminalSnapshot = null
-    settle(controller, terminal.state === 'error' && !gracefulCancellation ? 'error' : 'end', terminal.error)
-    return true
-  }
-
   const flush = (controller: ReadableStreamDefaultController<Uint8Array>) => {
-    while (pendingChunks.has(expectedSequence) && (controller.desiredSize ?? 1) > 0) {
+    while (pendingChunks.has(expectedSequence)) {
       const bytes = pendingChunks.get(expectedSequence)
       pendingChunks.delete(expectedSequence)
       expectedSequence += 1
       if (bytes?.byteLength) {
-        pendingBytes -= bytes.byteLength
         controller.enqueue(bytes)
       }
     }
-    finishIfReady(controller)
   }
 
   const decodeBase64 = (value: string): Uint8Array => {
@@ -314,23 +279,19 @@ function createPureAndroidReadableStream(
     return bytes
   }
 
-  const acceptChunk = (sequence: number, chunk: NativeStreamChunk) => {
-    if (sequence < expectedSequence || pendingChunks.has(sequence) || !hasPendingCapacity()) return
+  const acceptChunk = (
+    controller: ReadableStreamDefaultController<Uint8Array>,
+    sequence: number,
+    chunk: NativeStreamChunk
+  ) => {
+    if (sequence < expectedSequence || pendingChunks.has(sequence)) return
     const bytes = chunk.chunkBase64 ? decodeBase64(chunk.chunkBase64) : textEncoder.encode(chunk.chunk || '')
     pendingChunks.set(sequence, bytes)
-    pendingBytes += bytes.byteLength
-    while (pendingChunks.has(nativeReadThrough + 1)) {
-      nativeReadThrough += 1
-    }
-  }
-
-  const hasPendingCapacity = () => {
-    return pendingChunks.size < MAX_PENDING_CHUNKS && pendingBytes < MAX_PENDING_BYTES
+    flush(controller)
   }
 
   const schedulePull = (delay: number) => {
     if (!appActive || !documentVisible || !taskReady || streamSettled || !activeController || pullTimer) return
-    if (!hasPendingCapacity()) return
     if (pullInFlight) {
       pullRequested = true
       return
@@ -348,7 +309,6 @@ function createPureAndroidReadableStream(
     // A visible document is sufficient to optimistically drain the native buffer. Refresh
     // Capacitor state as well, but do not let a missed appStateChange event strand the cursor.
     appActive = true
-    flush(activeController)
     schedulePull(0)
     void App.getState()
       .then(({ isActive }) => {
@@ -383,33 +343,30 @@ function createPureAndroidReadableStream(
     pullRequested = false
     let receivedChunks = false
     let hasMoreBacklog = false
-    let pullFailed = false
     try {
       const snapshot = await PureStreamHttp.attachStream({
         id: streamId,
-        afterSequence: nativeReadThrough,
-        maxChunks: MAX_PULL_CHUNKS,
-        maxBytes: pullMaxBytes,
+        afterSequence: expectedSequence - 1,
+        maxChunks: 128,
+        maxBytes: 256 * 1024,
       })
       if (!appActive || !documentVisible || streamSettled || activeController !== controller) return
 
-      consecutivePullFailures = 0
-      pullMaxBytes = DEFAULT_PULL_BYTES
       receivedChunks = snapshot.chunks.length > 0
       hasMoreBacklog = snapshot.hasMore
-      if (snapshot.state === 'ended' || snapshot.state === 'error') {
-        terminalSnapshot = {
-          state: snapshot.state,
-          lastSequence: snapshot.lastSequence,
-          error: snapshot.error,
-        }
-      }
       for (const record of snapshot.chunks) {
-        acceptChunk(record.sequence, record)
+        acceptChunk(controller, record.sequence, record)
       }
-      flush(controller)
 
-      if (finishIfReady(controller)) return
+      const hasAllTerminalChunks = expectedSequence > snapshot.lastSequence
+      if (snapshot.state === 'ended' && hasAllTerminalChunks) {
+        settle(controller, 'end')
+        return
+      }
+      if (snapshot.state === 'error' && hasAllTerminalChunks) {
+        settle(controller, 'error', snapshot.error)
+        return
+      }
     } catch (error) {
       if (streamSettled) return
       const message = error instanceof Error ? error.message : String(error)
@@ -417,27 +374,12 @@ function createPureAndroidReadableStream(
         settle(controller, 'error', message)
         return
       }
-      pullFailed = true
-      consecutivePullFailures += 1
-      pullMaxBytes = Math.max(MIN_PULL_BYTES, Math.floor(pullMaxBytes / 2))
       console.warn(`Failed to read native stream ${streamId}:`, error)
     } finally {
       pullInFlight = false
-      if (!streamSettled && hasPendingCapacity()) {
-        const retryDelay = Math.min(
-          MAX_PULL_RETRY_DELAY_MS,
-          IDLE_PULL_INTERVAL_MS * 2 ** Math.max(0, consecutivePullFailures - 1)
-        )
-        schedulePull(
-          pullFailed
-            ? retryDelay
-            : pullRequested || hasMoreBacklog
-              ? 0
-              : receivedChunks
-                ? ACTIVE_PULL_INTERVAL_MS
-                : IDLE_PULL_INTERVAL_MS
-        )
-      }
+      schedulePull(
+        pullRequested || hasMoreBacklog ? 0 : receivedChunks ? ACTIVE_PULL_INTERVAL_MS : IDLE_PULL_INTERVAL_MS
+      )
     }
   }
 
@@ -458,48 +400,6 @@ function createPureAndroidReadableStream(
       try {
         activeController = controller
         document.addEventListener('visibilitychange', handleVisibilityChange)
-        removeChunk = (
-          await PureStreamHttp.addListener('chunk', (event) => {
-            if (event.id !== streamId || event.sequence === undefined) return
-            if (!appActive || !documentVisible) return
-            acceptChunk(event.sequence, {
-              sequence: event.sequence,
-              chunkBase64: event.chunkBase64,
-              chunk: event.chunk,
-            })
-            if (activeController === controller && !streamSettled) {
-              flush(controller)
-              if (event.sequence > nativeReadThrough) schedulePull(0)
-            }
-          })
-        ).remove
-        removeEnd = (
-          await PureStreamHttp.addListener('end', (event) => {
-            if (event.id !== streamId) return
-            terminalSnapshot = {
-              state: 'ended',
-              lastSequence: event.lastSequence ?? nativeReadThrough,
-            }
-            if (appActive && documentVisible && activeController === controller && !streamSettled) {
-              flush(controller)
-              schedulePull(0)
-            }
-          })
-        ).remove
-        removeError = (
-          await PureStreamHttp.addListener('error', (event) => {
-            if (event.id !== streamId) return
-            terminalSnapshot = {
-              state: 'error',
-              lastSequence: event.lastSequence ?? nativeReadThrough,
-              error: event.error,
-            }
-            if (appActive && documentVisible && activeController === controller && !streamSettled) {
-              flush(controller)
-              schedulePull(0)
-            }
-          })
-        ).remove
         removeAppState = (
           await App.addListener('appStateChange', ({ isActive }) => {
             appActive = isActive
@@ -511,7 +411,7 @@ function createPureAndroidReadableStream(
               return
             }
             documentVisible = document.visibilityState === 'visible'
-            wakeReader()
+            schedulePull(0)
           })
         ).remove
         documentVisible = document.visibilityState === 'visible'
@@ -547,9 +447,6 @@ function createPureAndroidReadableStream(
       }
     },
     pull: () => {
-      if (activeController) {
-        flush(activeController)
-      }
       schedulePull(0)
     },
     cancel: async () => {

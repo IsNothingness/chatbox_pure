@@ -1,11 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../../chatStore', () => ({
-  getSession: vi.fn(),
-  removeMessage: vi.fn().mockResolvedValue(undefined),
-  updateMessageCacheSync: vi.fn(),
+  updateMessageCache: vi.fn().mockResolvedValue(undefined),
   updateMessage: vi.fn().mockResolvedValue(undefined),
-  updateMessagePreservingCache: vi.fn().mockResolvedValue(undefined),
 }))
 
 vi.mock('../../settingsStore', () => ({
@@ -41,7 +38,7 @@ vi.mock('@/packages/token', () => ({
 
 import type { Message } from '@shared/types'
 import * as chatStore from '../../chatStore'
-import { persistStreamingMessage, removeMessage, updateStreamingCache } from '../messages'
+import { persistStreamingMessage, updateStreamingCache } from '../messages'
 
 function createTestMessage(overrides?: Partial<Message>): Message {
   return {
@@ -58,10 +55,10 @@ describe('updateStreamingCache', () => {
     vi.clearAllMocks()
   })
 
-  it('updates the cache synchronously with the latest VM snapshot', () => {
+  it('calls chatStore.updateMessageCache with correct args', () => {
     const msg = createTestMessage()
     updateStreamingCache('session-1', msg)
-    expect(chatStore.updateMessageCacheSync).toHaveBeenCalledWith(
+    expect(chatStore.updateMessageCache).toHaveBeenCalledWith(
       'session-1',
       'test-msg-1',
       expect.objectContaining({ id: 'test-msg-1' })
@@ -73,6 +70,12 @@ describe('updateStreamingCache', () => {
     const before = Date.now()
     updateStreamingCache('session-1', msg)
     expect(msg.timestamp).toBeGreaterThanOrEqual(before)
+  })
+
+  it('does not throw when chatStore rejects', async () => {
+    vi.mocked(chatStore.updateMessageCache).mockRejectedValueOnce(new Error('fail'))
+    expect(() => updateStreamingCache('session-1', createTestMessage())).not.toThrow()
+    await new Promise((resolve) => setTimeout(resolve, 10))
   })
 })
 
@@ -110,35 +113,5 @@ describe('persistStreamingMessage', () => {
     const msg = createTestMessage({ wordCount: 10 })
     await persistStreamingMessage('session-1', msg)
     expect(msg.wordCount).toBe(10)
-  })
-
-  it('persists intermediate snapshots without replacing the newer cache', async () => {
-    const msg = createTestMessage({ generating: true })
-    await persistStreamingMessage('session-1', msg, { preserveCache: true })
-    expect(chatStore.updateMessagePreservingCache).toHaveBeenCalledWith('session-1', 'test-msg-1', msg)
-    expect(chatStore.updateMessage).not.toHaveBeenCalled()
-  })
-})
-
-describe('removeMessage', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-  })
-
-  it('requests cancellation before deleting a generating message', async () => {
-    const cancel = vi.fn()
-    vi.mocked(chatStore.getSession).mockResolvedValue({
-      id: 'session-1',
-      name: 'Session',
-      messages: [createTestMessage({ generating: true, cancel })],
-    } as never)
-
-    await removeMessage('session-1', 'test-msg-1')
-
-    expect(cancel).toHaveBeenCalledOnce()
-    expect(chatStore.removeMessage).toHaveBeenCalledWith('session-1', 'test-msg-1')
-    expect(cancel.mock.invocationCallOrder[0]).toBeLessThan(
-      vi.mocked(chatStore.removeMessage).mock.invocationCallOrder[0]
-    )
   })
 })

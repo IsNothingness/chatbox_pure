@@ -8,7 +8,6 @@ export interface NativeGenerationRequestContext {
 interface NativeGenerationContextState extends NativeGenerationRequestContext {
   resumeConsumed: boolean
   attachedStreamIds: Set<string>
-  gracefulStopRequested: boolean
 }
 
 const contexts = new WeakMap<AbortSignal, NativeGenerationContextState>()
@@ -18,7 +17,6 @@ export function registerNativeGenerationContext(signal: AbortSignal, context: Na
     ...context,
     resumeConsumed: false,
     attachedStreamIds: new Set(),
-    gracefulStopRequested: false,
   })
 }
 
@@ -49,21 +47,6 @@ export function consumeNativeGenerationContext(
 export function recordAttachedNativeStream(signal: AbortSignal | undefined, streamId: string): void {
   if (!signal) return
   contexts.get(signal)?.attachedStreamIds.add(streamId)
-}
-
-/**
- * Marks an attached native response for a two-phase stop. The caller stops the
- * upstream connection, while the renderer keeps parsing every byte already buffered.
- */
-export function requestNativeGenerationStop(signal: AbortSignal): string[] {
-  const context = contexts.get(signal)
-  if (!context || context.attachedStreamIds.size === 0) return []
-  context.gracefulStopRequested = true
-  return [...context.attachedStreamIds]
-}
-
-export function isNativeGenerationStopRequested(signal: AbortSignal): boolean {
-  return contexts.get(signal)?.gracefulStopRequested === true
 }
 
 export function releaseNativeGenerationContext(signal: AbortSignal): string[] {

@@ -7,17 +7,6 @@ const mocks = vi.hoisted(() => ({
   attachStream: vi.fn(),
   cancelStream: vi.fn(() => Promise.resolve()),
   startStream: vi.fn((options: { id: string }) => Promise.resolve({ id: options.id })),
-  eventListeners: new Map<string, Set<(event: Record<string, unknown>) => void>>(),
-  addListener: vi.fn((eventName: string, listener: (event: Record<string, unknown>) => void) => {
-    const listeners = mocks.eventListeners.get(eventName) ?? new Set()
-    listeners.add(listener)
-    mocks.eventListeners.set(eventName, listeners)
-    return Promise.resolve({
-      remove: vi.fn(() => {
-        listeners.delete(listener)
-      }),
-    })
-  }),
 }))
 
 vi.mock('@/variables', () => ({ CHATBOX_BUILD_PLATFORM: 'android' }))
@@ -36,7 +25,6 @@ vi.mock('@capacitor/core', () => ({
     attachStream: mocks.attachStream,
     acknowledgeStream: mocks.acknowledgeStream,
     cancelStream: mocks.cancelStream,
-    addListener: mocks.addListener,
   })),
 }))
 vi.mock('capacitor-stream-http', () => ({ StreamHttp: {} }))
@@ -63,7 +51,6 @@ describe('native pull-backed stream', () => {
     vi.clearAllMocks()
     mocks.appStateListener = undefined
     mocks.appActive = true
-    mocks.eventListeners.clear()
     visibilityListener = undefined
     visibilityState = 'hidden'
     vi.stubGlobal('document', {
@@ -76,12 +63,6 @@ describe('native pull-backed stream', () => {
       removeEventListener: vi.fn(),
     })
   })
-
-  const emitNativeEvent = (eventName: string, event: Record<string, unknown>) => {
-    for (const listener of mocks.eventListeners.get(eventName) ?? []) {
-      listener(event)
-    }
-  }
 
   test('does not read the native task while the renderer is in the background', async () => {
     mocks.attachStream.mockResolvedValue({
@@ -104,81 +85,6 @@ describe('native pull-backed stream', () => {
     expect(mocks.attachStream).not.toHaveBeenCalled()
     await reader.cancel()
     expect(mocks.cancelStream).toHaveBeenCalledOnce()
-  })
-
-  test('delivers foreground native events directly without waiting for the snapshot poll', async () => {
-    setRendererActive(true)
-    mocks.attachStream.mockResolvedValue({
-      id: 'stream-1',
-      state: 'running',
-      lastSequence: -1,
-      createdAt: 1,
-      chunks: [],
-      hasMore: false,
-    })
-
-    const stream = createNativeReadableStream(
-      { url: 'https://example.com/stream', method: 'POST', headers: {}, body: '{}' },
-      { keepAlive: true, notificationTitle: 'Generating', notificationBody: 'Please wait' }
-    )
-    const reader = stream.getReader()
-    await vi.waitFor(() => expect(mocks.startStream).toHaveBeenCalledOnce())
-    const streamId = mocks.startStream.mock.calls[0][0].id
-
-    emitNativeEvent('chunk', {
-      id: streamId,
-      sequence: 0,
-      chunkBase64: 'ZGlyZWN0',
-    })
-    emitNativeEvent('end', { id: streamId, lastSequence: 0 })
-
-    const result = await reader.read()
-    expect(new TextDecoder().decode(result.value)).toBe('direct')
-    await expect(reader.read()).resolves.toEqual({ value: undefined, done: true })
-  })
-
-  test('fills a missed foreground event from the snapshot without duplicating later live bytes', async () => {
-    setRendererActive(true)
-    let resolveStart: ((value: { id: string }) => void) | undefined
-    mocks.startStream.mockImplementationOnce(
-      () =>
-        new Promise((resolve) => {
-          resolveStart = resolve
-        })
-    )
-    mocks.attachStream.mockImplementation(({ id }: { id: string }) =>
-      Promise.resolve({
-        id,
-        state: 'ended',
-        lastSequence: 1,
-        createdAt: 1,
-        chunks: [
-          { sequence: 0, chunkBase64: 'Zmlyc3Q=' },
-          { sequence: 1, chunkBase64: 'c2Vjb25k' },
-        ],
-        hasMore: false,
-      })
-    )
-
-    const stream = createNativeReadableStream(
-      { url: 'https://example.com/stream', method: 'POST', headers: {}, body: '{}' },
-      { keepAlive: true, notificationTitle: 'Generating', notificationBody: 'Please wait' }
-    )
-    const reader = stream.getReader()
-    await vi.waitFor(() => expect(mocks.startStream).toHaveBeenCalledOnce())
-    const streamId = mocks.startStream.mock.calls[0][0].id
-
-    emitNativeEvent('chunk', {
-      id: streamId,
-      sequence: 1,
-      chunkBase64: 'c2Vjb25k',
-    })
-    resolveStart?.({ id: streamId })
-
-    const decoder = new TextDecoder()
-    expect(decoder.decode((await reader.read()).value)).toBe('first')
-    expect(decoder.decode((await reader.read()).value)).toBe('second')
-    await expect(reader.read()).resolves.toEqual({ value: undefined, done: true })
   })
 
   test('never polls before a delayed native task has actually been created', async () => {
@@ -254,8 +160,8 @@ describe('native pull-backed stream', () => {
     expect(decoder.decode(second.value)).toBe('second')
     expect(terminal).toEqual({ value: undefined, done: true })
     expect(mocks.attachStream.mock.calls).toEqual([
-      [{ id: streamId, afterSequence: -1, maxChunks: 32, maxBytes: 64 * 1024 }],
-      [{ id: streamId, afterSequence: 0, maxChunks: 32, maxBytes: 64 * 1024 }],
+      [{ id: streamId, afterSequence: -1, maxChunks: 128, maxBytes: 256 * 1024 }],
+      [{ id: streamId, afterSequence: 0, maxChunks: 128, maxBytes: 256 * 1024 }],
     ])
   })
 
@@ -286,62 +192,6 @@ describe('native pull-backed stream', () => {
 
     expect(result.done).toBe(false)
     expect([...(result.value ?? new Uint8Array())]).toEqual([255, 0, 10, 128])
-  })
-
-  test('delivers the durable tail before surfacing a terminal transport error', async () => {
-    mocks.attachStream.mockResolvedValue({
-      id: 'stream-1',
-      state: 'error',
-      error: 'network failed',
-      lastSequence: 0,
-      createdAt: 1,
-      chunks: [{ sequence: 0, chunk: 'durable-tail' }],
-      hasMore: false,
-    })
-
-    const stream = createNativeReadableStream(
-      { url: 'https://example.com/stream', method: 'POST', headers: {}, body: '{}' },
-      {
-        keepAlive: true,
-        notificationTitle: 'Generating',
-        notificationBody: 'Please wait',
-        resumeStreamId: 'stream-1',
-      }
-    )
-    const reader = stream.getReader()
-    setRendererActive(true)
-
-    const tail = await reader.read()
-    expect(new TextDecoder().decode(tail.value)).toBe('durable-tail')
-    await expect(reader.read()).rejects.toThrow('network failed')
-  })
-
-  test('closes a gracefully cancelled stream after delivering its durable tail', async () => {
-    mocks.attachStream.mockResolvedValue({
-      id: 'stream-1',
-      state: 'error',
-      error: 'Cancelled',
-      lastSequence: 0,
-      createdAt: 1,
-      chunks: [{ sequence: 0, chunk: 'last-complete-event' }],
-      hasMore: false,
-    })
-
-    const stream = createNativeReadableStream(
-      { url: 'https://example.com/stream', method: 'POST', headers: {}, body: '{}' },
-      {
-        keepAlive: true,
-        notificationTitle: 'Generating',
-        notificationBody: 'Please wait',
-        resumeStreamId: 'stream-1',
-      }
-    )
-    const reader = stream.getReader()
-    setRendererActive(true)
-
-    const tail = await reader.read()
-    expect(new TextDecoder().decode(tail.value)).toBe('last-complete-event')
-    await expect(reader.read()).resolves.toEqual({ value: undefined, done: true })
   })
 
   test('stops polling in the background and immediately resumes from the last cursor', async () => {
@@ -384,8 +234,8 @@ describe('native pull-backed stream', () => {
     expect(mocks.attachStream).toHaveBeenLastCalledWith({
       id: 'stream-1',
       afterSequence: 0,
-      maxChunks: 32,
-      maxBytes: 64 * 1024,
+      maxChunks: 128,
+      maxBytes: 256 * 1024,
     })
   })
 
@@ -485,138 +335,5 @@ describe('native pull-backed stream', () => {
 
     expect(new TextDecoder().decode(result.value)).toBe('only-on-resume')
     expect(mocks.attachStream).toHaveBeenCalledTimes(2)
-  })
-
-  test('replays a large background backlog in bounded pages without dropping chunks', async () => {
-    const totalChunks = 96
-    mocks.attachStream.mockImplementation(
-      ({
-        id,
-        afterSequence,
-        maxChunks,
-        maxBytes,
-      }: {
-        id: string
-        afterSequence: number
-        maxChunks: number
-        maxBytes: number
-      }) => {
-        const firstSequence = afterSequence + 1
-        const endSequence = Math.min(totalChunks, firstSequence + maxChunks)
-        return Promise.resolve({
-          id,
-          state: 'ended',
-          lastSequence: totalChunks - 1,
-          createdAt: 1,
-          chunks: Array.from({ length: endSequence - firstSequence }, (_, index) => ({
-            sequence: firstSequence + index,
-            chunk: `${firstSequence + index},`,
-          })),
-          hasMore: endSequence < totalChunks,
-          maxBytes,
-        })
-      }
-    )
-
-    const stream = createNativeReadableStream(
-      { url: 'https://example.com/stream', method: 'POST', headers: {}, body: '{}' },
-      {
-        keepAlive: true,
-        notificationTitle: 'Generating',
-        notificationBody: 'Please wait',
-        resumeStreamId: 'stream-1',
-      }
-    )
-    const reader = stream.getReader()
-    setRendererActive(true)
-
-    const decoder = new TextDecoder()
-    let received = ''
-    while (true) {
-      const result = await reader.read()
-      if (result.done) break
-      received += decoder.decode(result.value)
-    }
-
-    expect(received).toBe(Array.from({ length: totalChunks }, (_, index) => `${index},`).join(''))
-    expect(mocks.attachStream).toHaveBeenCalledTimes(3)
-    for (const [options] of mocks.attachStream.mock.calls) {
-      expect(options).toMatchObject({ maxChunks: 32, maxBytes: 64 * 1024 })
-    }
-  })
-
-  test('prefetches native backlog independently from downstream reader demand', async () => {
-    const totalChunks = 96
-    mocks.attachStream.mockImplementation(
-      ({ id, afterSequence, maxChunks }: { id: string; afterSequence: number; maxChunks: number }) => {
-        const firstSequence = afterSequence + 1
-        const endSequence = Math.min(totalChunks, firstSequence + maxChunks)
-        return Promise.resolve({
-          id,
-          state: 'ended',
-          lastSequence: totalChunks - 1,
-          createdAt: 1,
-          chunks: Array.from({ length: endSequence - firstSequence }, (_, index) => ({
-            sequence: firstSequence + index,
-            chunk: `${firstSequence + index},`,
-          })),
-          hasMore: endSequence < totalChunks,
-        })
-      }
-    )
-
-    const stream = createNativeReadableStream(
-      { url: 'https://example.com/stream', method: 'POST', headers: {}, body: '{}' },
-      {
-        keepAlive: true,
-        notificationTitle: 'Generating',
-        notificationBody: 'Please wait',
-        resumeStreamId: 'stream-1',
-      }
-    )
-    const reader = stream.getReader()
-    setRendererActive(true)
-
-    // The native cursor must keep advancing even when the model parser has not
-    // consumed the first queued ReadableStream chunk yet.
-    await vi.waitFor(() => expect(mocks.attachStream).toHaveBeenCalledTimes(3))
-
-    const decoder = new TextDecoder()
-    let received = ''
-    while (true) {
-      const result = await reader.read()
-      if (result.done) break
-      received += decoder.decode(result.value)
-    }
-    expect(received).toBe(Array.from({ length: totalChunks }, (_, index) => `${index},`).join(''))
-  })
-
-  test('shrinks the bridge page and resumes after a transient snapshot failure', async () => {
-    mocks.attachStream.mockRejectedValueOnce(new Error('Capacitor bridge payload failed')).mockResolvedValue({
-      id: 'stream-1',
-      state: 'ended',
-      lastSequence: 0,
-      createdAt: 1,
-      chunks: [{ sequence: 0, chunk: 'recovered' }],
-      hasMore: false,
-    })
-
-    const stream = createNativeReadableStream(
-      { url: 'https://example.com/stream', method: 'POST', headers: {}, body: '{}' },
-      {
-        keepAlive: true,
-        notificationTitle: 'Generating',
-        notificationBody: 'Please wait',
-        resumeStreamId: 'stream-1',
-      }
-    )
-    const reader = stream.getReader()
-    setRendererActive(true)
-
-    const result = await reader.read()
-    await expect(reader.read()).resolves.toEqual({ value: undefined, done: true })
-    expect(new TextDecoder().decode(result.value)).toBe('recovered')
-    expect(mocks.attachStream.mock.calls[0][0]).toMatchObject({ maxBytes: 64 * 1024 })
-    expect(mocks.attachStream.mock.calls[1][0]).toMatchObject({ maxBytes: 32 * 1024 })
   })
 })

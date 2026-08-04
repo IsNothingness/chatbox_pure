@@ -1,7 +1,7 @@
 {
   "name": "chatbox-pure",
   "productName": "ChatBox Pure",
-  "version": "1.5.0",
+  "version": "1.4.0",
   "engines": {
     "node": ">=22.13.0 <23.0.0",
     "pnpm": ">=10.17.0"

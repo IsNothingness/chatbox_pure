@@ -30,39 +30,6 @@ import java.util.UUID;
 public class PureStreamHttpPlugin extends Plugin {
     private static final String TAG = "PureStreamHttp";
 
-    private final BackgroundStreamManager.Observer observer = new BackgroundStreamManager.Observer() {
-        @Override
-        public void onChunk(String id, long sequence, byte[] chunk) {
-            JSObject data = new JSObject();
-            data.put("id", id);
-            data.put("sequence", sequence);
-            data.put("chunkBase64", Base64.encodeToString(chunk, Base64.NO_WRAP));
-            notifyListeners("chunk", data);
-        }
-
-        @Override
-        public void onEnd(String id, long lastSequence) {
-            JSObject data = new JSObject();
-            data.put("id", id);
-            data.put("lastSequence", lastSequence);
-            notifyListeners("end", data);
-        }
-
-        @Override
-        public void onError(String id, long lastSequence, String error) {
-            JSObject data = new JSObject();
-            data.put("id", id);
-            data.put("lastSequence", lastSequence);
-            data.put("error", error);
-            notifyListeners("error", data);
-        }
-    };
-
-    @Override
-    public void load() {
-        BackgroundStreamManager.getInstance(getContext()).addObserver(observer);
-    }
-
     @PluginMethod
     public void startStream(PluginCall call) {
         String urlString = call.getString("url");
@@ -239,12 +206,6 @@ public class PureStreamHttpPlugin extends Plugin {
         String mode = call.getString("mode", "silent");
         BackgroundGenerationService.showCompletionNotification(getContext(), title, body, mode);
         call.resolve();
-    }
-
-    @Override
-    protected void handleOnDestroy() {
-        BackgroundStreamManager.getInstance(getContext()).removeObserver(observer);
-        super.handleOnDestroy();
     }
 
     private static JSObject snapshotToJs(

@@ -1,6 +1,4 @@
 // Re-export CRUD operations from session/crud.ts
-
-export { stopActiveGeneration } from './session/active-generation'
 export {
   _copySession,
   clear,

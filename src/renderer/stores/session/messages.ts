@@ -131,7 +131,9 @@ export async function modifyMessage(
  */
 export function updateStreamingCache(sessionId: string, message: Message): void {
   message.timestamp = Date.now()
-  chatStore.updateMessageCacheSync(sessionId, message.id, message)
+  chatStore.updateMessageCache(sessionId, message.id, message).catch((err) => {
+    console.error('Failed to update streaming cache:', err)
+  })
 }
 
 /**
@@ -141,7 +143,7 @@ export function updateStreamingCache(sessionId: string, message: Message): void 
 export async function persistStreamingMessage(
   sessionId: string,
   message: Message,
-  options?: { refreshCounting?: boolean; preserveCache?: boolean }
+  options?: { refreshCounting?: boolean }
 ): Promise<void> {
   if (options?.refreshCounting) {
     message.wordCount = countMessageWords(message)
@@ -149,11 +151,7 @@ export async function persistStreamingMessage(
     message.tokenCountMap = undefined
   }
   message.timestamp = Date.now()
-  if (options?.preserveCache) {
-    await chatStore.updateMessagePreservingCache(sessionId, message.id, message)
-  } else {
-    await chatStore.updateMessage(sessionId, message.id, message)
-  }
+  await chatStore.updateMessage(sessionId, message.id, message)
 }
 
 /**
@@ -162,14 +160,6 @@ export async function persistStreamingMessage(
  * @param messageId
  */
 export async function removeMessage(sessionId: string, messageId: string) {
-  const session = await chatStore.getSession(sessionId)
-  const message =
-    session?.messages.find((item) => item.id === messageId) ??
-    session?.threads?.flatMap((thread) => thread.messages).find((item) => item.id === messageId)
-  if (message?.generating) {
-    message.cancel?.()
-  }
-
   if (platform.type === 'desktop') {
     try {
       await platform.getSessionAttachmentRagController().deleteMessageAttachments(messageId)
