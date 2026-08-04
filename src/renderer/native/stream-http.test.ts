@@ -7,6 +7,17 @@ const mocks = vi.hoisted(() => ({
   attachStream: vi.fn(),
   cancelStream: vi.fn(() => Promise.resolve()),
   startStream: vi.fn((options: { id: string }) => Promise.resolve({ id: options.id })),
+  eventListeners: new Map<string, Set<(event: Record<string, unknown>) => void>>(),
+  addListener: vi.fn((eventName: string, listener: (event: Record<string, unknown>) => void) => {
+    const listeners = mocks.eventListeners.get(eventName) ?? new Set()
+    listeners.add(listener)
+    mocks.eventListeners.set(eventName, listeners)
+    return Promise.resolve({
+      remove: vi.fn(() => {
+        listeners.delete(listener)
+      }),
+    })
+  }),
 }))
 
 vi.mock('@/variables', () => ({ CHATBOX_BUILD_PLATFORM: 'android' }))
@@ -25,6 +36,7 @@ vi.mock('@capacitor/core', () => ({
     attachStream: mocks.attachStream,
     acknowledgeStream: mocks.acknowledgeStream,
     cancelStream: mocks.cancelStream,
+    addListener: mocks.addListener,
   })),
 }))
 vi.mock('capacitor-stream-http', () => ({ StreamHttp: {} }))
@@ -51,6 +63,7 @@ describe('native pull-backed stream', () => {
     vi.clearAllMocks()
     mocks.appStateListener = undefined
     mocks.appActive = true
+    mocks.eventListeners.clear()
     visibilityListener = undefined
     visibilityState = 'hidden'
     vi.stubGlobal('document', {
@@ -63,6 +76,12 @@ describe('native pull-backed stream', () => {
       removeEventListener: vi.fn(),
     })
   })
+
+  const emitNativeEvent = (eventName: string, event: Record<string, unknown>) => {
+    for (const listener of mocks.eventListeners.get(eventName) ?? []) {
+      listener(event)
+    }
+  }
 
   test('does not read the native task while the renderer is in the background', async () => {
     mocks.attachStream.mockResolvedValue({
@@ -85,6 +104,81 @@ describe('native pull-backed stream', () => {
     expect(mocks.attachStream).not.toHaveBeenCalled()
     await reader.cancel()
     expect(mocks.cancelStream).toHaveBeenCalledOnce()
+  })
+
+  test('delivers foreground native events directly without waiting for the snapshot poll', async () => {
+    setRendererActive(true)
+    mocks.attachStream.mockResolvedValue({
+      id: 'stream-1',
+      state: 'running',
+      lastSequence: -1,
+      createdAt: 1,
+      chunks: [],
+      hasMore: false,
+    })
+
+    const stream = createNativeReadableStream(
+      { url: 'https://example.com/stream', method: 'POST', headers: {}, body: '{}' },
+      { keepAlive: true, notificationTitle: 'Generating', notificationBody: 'Please wait' }
+    )
+    const reader = stream.getReader()
+    await vi.waitFor(() => expect(mocks.startStream).toHaveBeenCalledOnce())
+    const streamId = mocks.startStream.mock.calls[0][0].id
+
+    emitNativeEvent('chunk', {
+      id: streamId,
+      sequence: 0,
+      chunkBase64: 'ZGlyZWN0',
+    })
+    emitNativeEvent('end', { id: streamId, lastSequence: 0 })
+
+    const result = await reader.read()
+    expect(new TextDecoder().decode(result.value)).toBe('direct')
+    await expect(reader.read()).resolves.toEqual({ value: undefined, done: true })
+  })
+
+  test('fills a missed foreground event from the snapshot without duplicating later live bytes', async () => {
+    setRendererActive(true)
+    let resolveStart: ((value: { id: string }) => void) | undefined
+    mocks.startStream.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveStart = resolve
+        })
+    )
+    mocks.attachStream.mockImplementation(({ id }: { id: string }) =>
+      Promise.resolve({
+        id,
+        state: 'ended',
+        lastSequence: 1,
+        createdAt: 1,
+        chunks: [
+          { sequence: 0, chunkBase64: 'Zmlyc3Q=' },
+          { sequence: 1, chunkBase64: 'c2Vjb25k' },
+        ],
+        hasMore: false,
+      })
+    )
+
+    const stream = createNativeReadableStream(
+      { url: 'https://example.com/stream', method: 'POST', headers: {}, body: '{}' },
+      { keepAlive: true, notificationTitle: 'Generating', notificationBody: 'Please wait' }
+    )
+    const reader = stream.getReader()
+    await vi.waitFor(() => expect(mocks.startStream).toHaveBeenCalledOnce())
+    const streamId = mocks.startStream.mock.calls[0][0].id
+
+    emitNativeEvent('chunk', {
+      id: streamId,
+      sequence: 1,
+      chunkBase64: 'c2Vjb25k',
+    })
+    resolveStart?.({ id: streamId })
+
+    const decoder = new TextDecoder()
+    expect(decoder.decode((await reader.read()).value)).toBe('first')
+    expect(decoder.decode((await reader.read()).value)).toBe('second')
+    await expect(reader.read()).resolves.toEqual({ value: undefined, done: true })
   })
 
   test('never polls before a delayed native task has actually been created', async () => {

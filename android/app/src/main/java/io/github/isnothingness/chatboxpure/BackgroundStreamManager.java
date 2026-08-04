@@ -14,6 +14,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -47,6 +48,14 @@ final class BackgroundStreamManager {
     private static final long TERMINAL_RETENTION_MS = 60L * 60L * 1000L;
     private static final long PERSIST_DEBOUNCE_MS = 250L;
     private static volatile BackgroundStreamManager instance;
+
+    interface Observer {
+        void onChunk(String id, long sequence, byte[] chunk);
+
+        void onEnd(String id, long lastSequence);
+
+        void onError(String id, long lastSequence, String error);
+    }
 
     static final class StreamRequest {
         final String url;
@@ -191,6 +200,7 @@ final class BackgroundStreamManager {
     private final BackgroundStreamStore persistenceStore;
     private final OkHttpClient httpClient;
     private final Map<String, StreamTask> tasks = new ConcurrentHashMap<>();
+    private final CopyOnWriteArraySet<Observer> observers = new CopyOnWriteArraySet<>();
     private final ExecutorService executor = Executors.newCachedThreadPool();
     private final ScheduledExecutorService persistenceExecutor = Executors.newSingleThreadScheduledExecutor();
 
@@ -284,6 +294,14 @@ final class BackgroundStreamManager {
         return snapshots;
     }
 
+    void addObserver(Observer observer) {
+        observers.add(observer);
+    }
+
+    void removeObserver(Observer observer) {
+        observers.remove(observer);
+    }
+
     void acknowledge(String id) {
         StreamTask task = tasks.get(id);
         if (task == null) {
@@ -333,6 +351,11 @@ final class BackgroundStreamManager {
         // The renderer can drain the durable tail and acknowledges the task only after
         // the final chat message has been saved.
         persistTaskNow(task);
+        long lastSequence;
+        synchronized (task.lock) {
+            lastSequence = task.nextSequence - 1;
+        }
+        notifyError(task.id, lastSequence, "Cancelled");
     }
 
     private void runTask(StreamTask task) {
@@ -473,10 +496,12 @@ final class BackgroundStreamManager {
             task.bufferedBytes += chunkBytes;
             task.chunks.add(new ChunkRecord(sequence, chunk));
         }
+        notifyChunk(task.id, sequence, chunk);
         persistTaskSoon(task);
     }
 
     private void endTask(StreamTask task) {
+        long lastSequence;
         synchronized (task.lock) {
             if (!STATE_RUNNING.equals(task.state)) {
                 return;
@@ -484,12 +509,15 @@ final class BackgroundStreamManager {
             task.state = STATE_ENDED;
             task.terminalAt = System.currentTimeMillis();
             task.terminalDurable = false;
+            lastSequence = task.nextSequence - 1;
         }
         persistTaskNow(task);
+        notifyEnd(task.id, lastSequence);
     }
 
     private void failTask(StreamTask task, Throwable error) {
         String message = error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage();
+        long lastSequence;
         synchronized (task.lock) {
             if (!STATE_RUNNING.equals(task.state)) {
                 return;
@@ -498,8 +526,40 @@ final class BackgroundStreamManager {
             task.error = message;
             task.terminalAt = System.currentTimeMillis();
             task.terminalDurable = false;
+            lastSequence = task.nextSequence - 1;
         }
         persistTaskNow(task);
+        notifyError(task.id, lastSequence, message);
+    }
+
+    private void notifyError(String id, long lastSequence, String error) {
+        for (Observer observer : observers) {
+            try {
+                observer.onError(id, lastSequence, error);
+            } catch (RuntimeException observerError) {
+                Log.w(TAG, "Could not deliver stream error event for " + id, observerError);
+            }
+        }
+    }
+
+    private void notifyChunk(String id, long sequence, byte[] chunk) {
+        for (Observer observer : observers) {
+            try {
+                observer.onChunk(id, sequence, chunk);
+            } catch (RuntimeException observerError) {
+                Log.w(TAG, "Could not deliver stream chunk event for " + id, observerError);
+            }
+        }
+    }
+
+    private void notifyEnd(String id, long lastSequence) {
+        for (Observer observer : observers) {
+            try {
+                observer.onEnd(id, lastSequence);
+            } catch (RuntimeException observerError) {
+                Log.w(TAG, "Could not deliver stream end event for " + id, observerError);
+            }
+        }
     }
 
     private void finishTask(StreamTask task) {

@@ -50,6 +50,7 @@ interface PureStreamEvent {
   id: string
   sequence?: number
   lastSequence?: number
+  chunkBase64?: string
   chunk?: string
   error?: string
 }
@@ -209,6 +210,9 @@ function createPureAndroidReadableStream(
 ): ReadableStream<Uint8Array> {
   let streamId = background?.resumeStreamId || createStreamId()
   let removeAppState: (() => void) | null = null
+  let removeChunk: (() => void) | null = null
+  let removeEnd: (() => void) | null = null
+  let removeError: (() => void) | null = null
   let pullTimer: ReturnType<typeof setTimeout> | null = null
   let pullInFlight = false
   let pullRequested = false
@@ -252,6 +256,12 @@ function createPureAndroidReadableStream(
     }
     removeAppState?.()
     removeAppState = null
+    removeChunk?.()
+    removeEnd?.()
+    removeError?.()
+    removeChunk = null
+    removeEnd = null
+    removeError = null
     document.removeEventListener('visibilitychange', handleVisibilityChange)
   }
 
@@ -305,15 +315,13 @@ function createPureAndroidReadableStream(
   }
 
   const acceptChunk = (sequence: number, chunk: NativeStreamChunk) => {
-    if (sequence <= nativeReadThrough) return
-    if (sequence !== nativeReadThrough + 1) {
-      console.warn(`Native stream ${streamId} returned a non-contiguous chunk at ${sequence}`)
-      return
-    }
+    if (sequence < expectedSequence || pendingChunks.has(sequence) || !hasPendingCapacity()) return
     const bytes = chunk.chunkBase64 ? decodeBase64(chunk.chunkBase64) : textEncoder.encode(chunk.chunk || '')
     pendingChunks.set(sequence, bytes)
     pendingBytes += bytes.byteLength
-    nativeReadThrough = sequence
+    while (pendingChunks.has(nativeReadThrough + 1)) {
+      nativeReadThrough += 1
+    }
   }
 
   const hasPendingCapacity = () => {
@@ -450,6 +458,48 @@ function createPureAndroidReadableStream(
       try {
         activeController = controller
         document.addEventListener('visibilitychange', handleVisibilityChange)
+        removeChunk = (
+          await PureStreamHttp.addListener('chunk', (event) => {
+            if (event.id !== streamId || event.sequence === undefined) return
+            if (!appActive || !documentVisible) return
+            acceptChunk(event.sequence, {
+              sequence: event.sequence,
+              chunkBase64: event.chunkBase64,
+              chunk: event.chunk,
+            })
+            if (activeController === controller && !streamSettled) {
+              flush(controller)
+              if (event.sequence > nativeReadThrough) schedulePull(0)
+            }
+          })
+        ).remove
+        removeEnd = (
+          await PureStreamHttp.addListener('end', (event) => {
+            if (event.id !== streamId) return
+            terminalSnapshot = {
+              state: 'ended',
+              lastSequence: event.lastSequence ?? nativeReadThrough,
+            }
+            if (appActive && documentVisible && activeController === controller && !streamSettled) {
+              flush(controller)
+              schedulePull(0)
+            }
+          })
+        ).remove
+        removeError = (
+          await PureStreamHttp.addListener('error', (event) => {
+            if (event.id !== streamId) return
+            terminalSnapshot = {
+              state: 'error',
+              lastSequence: event.lastSequence ?? nativeReadThrough,
+              error: event.error,
+            }
+            if (appActive && documentVisible && activeController === controller && !streamSettled) {
+              flush(controller)
+              schedulePull(0)
+            }
+          })
+        ).remove
         removeAppState = (
           await App.addListener('appStateChange', ({ isActive }) => {
             appActive = isActive

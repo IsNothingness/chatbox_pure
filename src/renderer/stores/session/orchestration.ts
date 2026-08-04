@@ -40,6 +40,7 @@ import * as chatStore from '../chatStore'
 import * as settingActions from '../settingActions'
 import { settingsStore } from '../settingsStore'
 import { uiStore } from '../uiStore'
+import { registerActiveGenerationStop } from './active-generation'
 import { prepareAgentGenerationHarness, refreshSessionAttachmentStatuses } from './agent-harness'
 import { getSessionAgentModeEntry, lockSessionAgentMode, setSessionAgentMode } from './agent-mode'
 import {
@@ -532,8 +533,6 @@ export async function orchestrateGeneration(
 
   targetMsg = await initializeTargetMessage(targetMsg, settings, globalSettings, session.type)
 
-  await persistStreamingMessage(sessionId, targetMsg)
-
   const found = findTargetMessageIndex(session, targetMsg.id)
   if (!found) return
   const { messages, index: targetMsgIx } = found
@@ -547,34 +546,36 @@ export async function orchestrateGeneration(
     messageId: targetMsg.id,
     resumeStreamId: options?.resumeNativeStreamId,
   })
+  const requestStop = () => {
+    const attachedStreamIds = requestNativeGenerationStop(controller.signal)
+    if (attachedStreamIds.length === 0) {
+      controller.abort()
+      return
+    }
+    if (hardStopTimer) {
+      clearTimeout(hardStopTimer)
+      hardStopTimer = null
+      controller.abort()
+      return
+    }
+    for (const streamId of attachedStreamIds) {
+      void cancelNativeStream(streamId)
+    }
+    // If the backend already reached a terminal state while the parser is stuck,
+    // cancelling that backend is a no-op. Always retain a hard-stop escape hatch.
+    hardStopTimer = setTimeout(() => {
+      hardStopTimer = null
+      controller.abort()
+    }, GRACEFUL_NATIVE_STOP_TIMEOUT_MS)
+  }
+  const releaseActiveGenerationStop = registerActiveGenerationStop(sessionId, requestStop)
   // Wire the stop button to this controller before any pre-stream network work
   // runs (agent-mode suggestion classifier, MCP/tool harness setup). Those steps
   // issue real requests that can hang; without a cancel handler in the message
   // cache the stop button would be a no-op until the main stream starts.
   targetMsg = {
     ...targetMsg,
-    cancel: () => {
-      const attachedStreamIds = requestNativeGenerationStop(controller.signal)
-      if (attachedStreamIds.length === 0) {
-        controller.abort()
-        return
-      }
-      if (hardStopTimer) {
-        clearTimeout(hardStopTimer)
-        hardStopTimer = null
-        controller.abort()
-        return
-      }
-      for (const streamId of attachedStreamIds) {
-        void cancelNativeStream(streamId)
-      }
-      // If the backend already reached a terminal state while the parser is stuck,
-      // cancelling that backend is a no-op. Always retain a hard-stop escape hatch.
-      hardStopTimer = setTimeout(() => {
-        hardStopTimer = null
-        controller.abort()
-      }, GRACEFUL_NATIVE_STOP_TIMEOUT_MS)
-    },
+    cancel: requestStop,
   }
   updateStreamingCache(sessionId, targetMsg)
   let processorState = createInitialState()
@@ -582,6 +583,10 @@ export async function orchestrateGeneration(
   let promptMsgs: Message[] = []
 
   try {
+    // Publish the runtime stop handle before the first storage write. A slow SQLite
+    // transaction must never create a window where the UI shows "generating" but
+    // has no authoritative task to cancel.
+    await persistStreamingMessage(sessionId, targetMsg, { preserveCache: true })
     const dependencies = await createModelDependencies()
     const model = await createModel(settings, dependencies)
     const sessionKnowledgeBaseMap = uiStore.getState().sessionKnowledgeBaseMap
@@ -845,6 +850,7 @@ export async function orchestrateGeneration(
     })
     await persistFinalMessage(targetMsg)
   } finally {
+    releaseActiveGenerationStop()
     if (hardStopTimer) {
       clearTimeout(hardStopTimer)
       hardStopTimer = null
