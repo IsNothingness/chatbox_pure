@@ -363,7 +363,14 @@ final class BackgroundStreamManager {
                 "REPORT".equals(method);
             RequestBody requestBody = null;
             if (requiresBody || !bodyText.isEmpty()) {
-                MediaType mediaType = MediaType.parse(request.headers.get("Content-Type"));
+                String contentType = null;
+                for (Map.Entry<String, String> header : request.headers.entrySet()) {
+                    if ("Content-Type".equalsIgnoreCase(header.getKey())) {
+                        contentType = header.getValue();
+                        break;
+                    }
+                }
+                MediaType mediaType = MediaType.parse(contentType);
                 requestBody = RequestBody.create(
                     mediaType,
                     bodyText.getBytes(StandardCharsets.UTF_8)
@@ -397,6 +404,21 @@ final class BackgroundStreamManager {
             }
         } catch (IOException error) {
             Log.e(TAG, "Stream " + task.id + " failed", error);
+            if (isRunning(task)) {
+                failTask(task, error);
+            }
+        } catch (RuntimeException error) {
+            // Request construction and transport adapters may reject malformed or
+            // unsupported inputs with unchecked exceptions. Never let an executor
+            // thread's uncaught exception terminate the whole Android process.
+            Log.e(TAG, "Stream " + task.id + " crashed", error);
+            if (isRunning(task)) {
+                failTask(task, error);
+            }
+        } catch (LinkageError error) {
+            // A transport dependency mismatch is a task failure, not a reason to
+            // kill the app process and strand the persisted stream as "running".
+            Log.e(TAG, "Stream transport could not be loaded for " + task.id, error);
             if (isRunning(task)) {
                 failTask(task, error);
             }
@@ -466,7 +488,7 @@ final class BackgroundStreamManager {
         persistTaskNow(task);
     }
 
-    private void failTask(StreamTask task, IOException error) {
+    private void failTask(StreamTask task, Throwable error) {
         String message = error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage();
         synchronized (task.lock) {
             if (!STATE_RUNNING.equals(task.state)) {
