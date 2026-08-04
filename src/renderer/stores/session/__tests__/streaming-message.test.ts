@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../../chatStore', () => ({
   updateMessageCache: vi.fn().mockResolvedValue(undefined),
+  updateMessageCacheSync: vi.fn(),
   updateMessage: vi.fn().mockResolvedValue(undefined),
 }))
 
@@ -55,10 +56,10 @@ describe('updateStreamingCache', () => {
     vi.clearAllMocks()
   })
 
-  it('calls chatStore.updateMessageCache with correct args', () => {
+  it('calls chatStore.updateMessageCacheSync with correct args', () => {
     const msg = createTestMessage()
     updateStreamingCache('session-1', msg)
-    expect(chatStore.updateMessageCache).toHaveBeenCalledWith(
+    expect(chatStore.updateMessageCacheSync).toHaveBeenCalledWith(
       'session-1',
       'test-msg-1',
       expect.objectContaining({ id: 'test-msg-1' })
@@ -72,10 +73,11 @@ describe('updateStreamingCache', () => {
     expect(msg.timestamp).toBeGreaterThanOrEqual(before)
   })
 
-  it('does not throw when chatStore rejects', async () => {
-    vi.mocked(chatStore.updateMessageCache).mockRejectedValueOnce(new Error('fail'))
+  it('does not throw when the synchronous cache update fails', () => {
+    vi.mocked(chatStore.updateMessageCacheSync).mockImplementationOnce(() => {
+      throw new Error('fail')
+    })
     expect(() => updateStreamingCache('session-1', createTestMessage())).not.toThrow()
-    await new Promise((resolve) => setTimeout(resolve, 10))
   })
 })
 

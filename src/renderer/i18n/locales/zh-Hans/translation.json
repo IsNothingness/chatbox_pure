@@ -1263,5 +1263,6 @@
   "ChatBox Pure is generating a reply": "ChatBox Pure 正在生成回复",
   "You can leave the app or turn off the screen.": "可以离开应用或关闭屏幕。",
   "Reply generated": "回复已生成",
+  "The connection ended before the provider confirmed that the reply was complete.": "连接已结束，但服务商没有确认回复完整。已保留收到的部分内容。",
   "Tap to return to ChatBox Pure and view the reply.": "点击返回 ChatBox Pure 查看回复。"
 }

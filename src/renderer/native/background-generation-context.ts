@@ -8,6 +8,7 @@ export interface NativeGenerationRequestContext {
 interface NativeGenerationContextState extends NativeGenerationRequestContext {
   resumeConsumed: boolean
   attachedStreamIds: Set<string>
+  stopRequested: boolean
 }
 
 const contexts = new WeakMap<AbortSignal, NativeGenerationContextState>()
@@ -17,6 +18,7 @@ export function registerNativeGenerationContext(signal: AbortSignal, context: Na
     ...context,
     resumeConsumed: false,
     attachedStreamIds: new Set(),
+    stopRequested: false,
   })
 }
 
@@ -47,6 +49,17 @@ export function consumeNativeGenerationContext(
 export function recordAttachedNativeStream(signal: AbortSignal | undefined, streamId: string): void {
   if (!signal) return
   contexts.get(signal)?.attachedStreamIds.add(streamId)
+}
+
+export function requestNativeGenerationStop(signal: AbortSignal): string[] {
+  const context = contexts.get(signal)
+  if (!context) return []
+  context.stopRequested = true
+  return [...context.attachedStreamIds]
+}
+
+export function isNativeGenerationStopRequested(signal: AbortSignal): boolean {
+  return contexts.get(signal)?.stopRequested === true
 }
 
 export function releaseNativeGenerationContext(signal: AbortSignal): string[] {

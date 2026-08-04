@@ -13,6 +13,7 @@ import type {
 import { getMessageText } from '@shared/utils/message'
 import type { ModelMessage, ToolSet } from 'ai'
 import { createModel, createModelDependencies } from '@/adapters'
+import i18n from '@/i18n'
 import {
   type AgentModeEntrySource,
   captureAgentModeException,
@@ -20,8 +21,13 @@ import {
   trackAgentModeSuggested,
   trackWorkModeSuggestionDecision,
 } from '@/analytics/agent-mode'
-import { registerNativeGenerationContext, releaseNativeGenerationContext } from '@/native/background-generation-context'
-import { acknowledgeNativeStreams } from '@/native/stream-http'
+import {
+  isNativeGenerationStopRequested,
+  registerNativeGenerationContext,
+  releaseNativeGenerationContext,
+  requestNativeGenerationStop,
+} from '@/native/background-generation-context'
+import { acknowledgeNativeStreams, cancelNativeStream, writeGenerationDebugLog } from '@/native/stream-http'
 import { AppActionApprovalPausedError } from '@/packages/app-action-approval'
 import * as appleAppStore from '@/packages/apple_app_store'
 import { wakeBackgroundTaskFollowUps } from '@/packages/chatbox-cli/background-follow-up'
@@ -48,6 +54,14 @@ import {
 import { createAttachmentResolver } from './attachment-resolver'
 import { findMessageLocation } from './forks'
 import { withSessionGenerationLock } from './generation-lock'
+import {
+  commitGenerationRuntime,
+  getGenerationRuntimeDuration,
+  getGenerationRuntimeMessage,
+  releaseGenerationRuntime,
+  startGenerationRuntime,
+  updateGenerationRuntime,
+} from './generation-runtime'
 import { modifyMessage, persistStreamingMessage, updateStreamingCache } from './messages'
 import { createInitialState, processStreamChunk } from './stream-chunk-processor'
 import { buildToolsForSession } from './tools-builder'
@@ -473,19 +487,74 @@ export async function orchestrateGeneration(
 
   const startTime = Date.now()
   let firstTokenLatency: number | undefined
-  const persistInterval = 2000
-  let lastPersistTimestamp = Date.now()
+  let lastDebugCheckpoint = Date.now()
+  let finalCommitSucceeded = false
+  const controller = new AbortController()
 
   targetMsg = await initializeTargetMessage(targetMsg, settings, globalSettings, session.type)
-
-  await persistStreamingMessage(sessionId, targetMsg)
+  startGenerationRuntime(sessionId, targetMsg)
+  writeGenerationDebugLog('generation_runtime_started', {
+    sessionId,
+    messageId: targetMsg.id,
+    contentChars: getMessageText(targetMsg, true, true).length,
+    contentParts: targetMsg.contentParts.length,
+  })
+  const publishRuntimeMessage = (message: Message) => {
+    targetMsg = updateGenerationRuntime(sessionId, message)
+    updateStreamingCache(sessionId, targetMsg)
+  }
+  const persistFinalMessage = async (message: Message) => {
+    publishRuntimeMessage(message)
+    const cachedMessage = getGenerationRuntimeMessage(sessionId, message.id) ?? message
+    writeGenerationDebugLog('generation_finalizing', {
+      sessionId,
+      messageId: message.id,
+      contentChars: getMessageText(cachedMessage, true, true).length,
+      contentParts: cachedMessage.contentParts.length,
+      durationMs: getGenerationRuntimeDuration(sessionId, message.id),
+      stopRequested: isNativeGenerationStopRequested(controller.signal),
+      finishReasonPresent: Boolean(cachedMessage.finishReason),
+    })
+    writeGenerationDebugLog('sql_commit_started', {
+      sessionId,
+      messageId: message.id,
+      contentChars: getMessageText(cachedMessage, true, true).length,
+    })
+    try {
+      await commitGenerationRuntime(sessionId, message.id, async (runtimeMessage) => {
+        await persistStreamingMessage(sessionId, runtimeMessage, { refreshCounting: true })
+      })
+      finalCommitSucceeded = true
+      writeGenerationDebugLog('sql_commit_completed', {
+        sessionId,
+        messageId: message.id,
+        contentChars: getMessageText(cachedMessage, true, true).length,
+        success: true,
+      })
+      writeGenerationDebugLog('generation_runtime_released', {
+        sessionId,
+        messageId: message.id,
+        success: true,
+      })
+    } catch (error) {
+      writeGenerationDebugLog('sql_commit_failed', {
+        sessionId,
+        messageId: message.id,
+        errorType: error instanceof Error ? error.name : typeof error,
+        success: false,
+      })
+      throw error
+    }
+  }
 
   const found = findTargetMessageIndex(session, targetMsg.id)
-  if (!found) return
+  if (!found) {
+    releaseGenerationRuntime(sessionId, targetMsg.id)
+    return
+  }
   const { messages, index: targetMsgIx } = found
   const promptTargetMsgIx = options?.appendToMessage ? targetMsgIx + 1 : targetMsgIx
 
-  const controller = new AbortController()
   registerNativeGenerationContext(controller.signal, {
     clientRequestId: `${sessionId}:${targetMsg.id}`,
     sessionId,
@@ -496,8 +565,25 @@ export async function orchestrateGeneration(
   // runs (agent-mode suggestion classifier, MCP/tool harness setup). Those steps
   // issue real requests that can hang; without a cancel handler in the message
   // cache the stop button would be a no-op until the main stream starts.
-  targetMsg = { ...targetMsg, cancel: () => controller.abort() }
-  updateStreamingCache(sessionId, targetMsg)
+  targetMsg = {
+    ...targetMsg,
+    cancel: () => {
+      const attachedStreamIds = requestNativeGenerationStop(controller.signal)
+      writeGenerationDebugLog('generation_cancel_requested', {
+        sessionId,
+        messageId: targetMsg.id,
+        chunkCount: attachedStreamIds.length,
+      })
+      if (attachedStreamIds.length === 0) {
+        controller.abort()
+        return
+      }
+      for (const streamId of attachedStreamIds) {
+        void cancelNativeStream(streamId)
+      }
+    },
+  }
+  publishRuntimeMessage(targetMsg)
   let processorState = createInitialState()
   const infoParts: MessageContentParts = []
   let promptMsgs: Message[] = []
@@ -545,7 +631,7 @@ export async function orchestrateGeneration(
       // and returns normally, so this won't reach the catch block below.
       if (controller.signal.aborted) {
         targetMsg = { ...targetMsg, generating: false, cancel: undefined, status: [] }
-        await persistStreamingMessage(sessionId, targetMsg, { refreshCounting: true })
+        await persistFinalMessage(targetMsg)
         return
       }
 
@@ -578,7 +664,7 @@ export async function orchestrateGeneration(
           status: [],
           finishReason: 'agent-mode-suggested',
         }
-        await persistStreamingMessage(sessionId, targetMsg, { refreshCounting: true })
+        await persistFinalMessage(targetMsg)
         return
       }
 
@@ -653,7 +739,7 @@ export async function orchestrateGeneration(
             ...targetMsg,
             status: result.statusChunk.status ? [result.statusChunk.status] : [],
           }
-          updateStreamingCache(sessionId, targetMsg)
+          publishRuntimeMessage(targetMsg)
         }
         continue
       }
@@ -674,14 +760,17 @@ export async function orchestrateGeneration(
         firstTokenLatency,
       }
 
-      const shouldPersist = shouldPersistStreamingChunk(chunk.type, Date.now() - lastPersistTimestamp, persistInterval)
-      if (shouldPersist) {
-        void persistStreamingMessage(sessionId, targetMsg)
-      } else {
-        updateStreamingCache(sessionId, targetMsg)
-      }
-      if (shouldPersist) {
-        lastPersistTimestamp = Date.now()
+      publishRuntimeMessage(targetMsg)
+      const checkpointNow = Date.now()
+      if (checkpointNow - lastDebugCheckpoint >= 2000) {
+        lastDebugCheckpoint = checkpointNow
+        writeGenerationDebugLog('generation_checkpoint', {
+          sessionId,
+          messageId: targetMsg.id,
+          contentChars: textLength,
+          contentParts: targetMsg.contentParts.length,
+          durationMs: checkpointNow - startTime,
+        })
       }
     }
 
@@ -696,7 +785,7 @@ export async function orchestrateGeneration(
         finishReason: 'tool-call-paused',
         usage: processorState.usage,
       }
-      await persistStreamingMessage(sessionId, targetMsg, { refreshCounting: true })
+      await persistFinalMessage(targetMsg)
       return
     }
 
@@ -714,6 +803,11 @@ export async function orchestrateGeneration(
       }
     }
 
+    const stoppedByUser = isNativeGenerationStopRequested(controller.signal)
+    const incompleteEof = !stoppedByUser && !processorState.finishReason
+    const incompleteEofMessage = i18n.t(
+      'The connection ended before the provider confirmed that the reply was complete.'
+    )
     targetMsg = {
       ...targetMsg,
       generating: false,
@@ -721,13 +815,29 @@ export async function orchestrateGeneration(
       contentParts: [...infoParts, ...processorState.contentParts],
       tokensUsed: targetMsg.tokensUsed ?? estimateTokensFromMessages([...promptMsgs, targetMsg]),
       status: [],
-      finishReason: processorState.finishReason,
+      finishReason: processorState.finishReason ?? (stoppedByUser ? 'stop' : undefined),
       usage: processorState.usage,
       generationDuration: Date.now() - startTime,
+      error: incompleteEof
+        ? typeof incompleteEofMessage === 'string'
+          ? incompleteEofMessage
+          : 'The connection ended before the provider confirmed that the reply was complete.'
+        : targetMsg.error,
+    }
+    if (incompleteEof) {
+      writeGenerationDebugLog('generation_incomplete_eof', {
+        sessionId,
+        messageId: targetMsg.id,
+        contentChars: getMessageText(targetMsg, true, true).length,
+        contentParts: targetMsg.contentParts.length,
+        finishReasonPresent: false,
+      })
     }
 
-    await persistStreamingMessage(sessionId, targetMsg, { refreshCounting: true })
-    appleAppStore.tickAfterMessageGenerated()
+    await persistFinalMessage(targetMsg)
+    if (!incompleteEof && !stoppedByUser) {
+      appleAppStore.tickAfterMessageGenerated()
+    }
   } catch (err: unknown) {
     const pause = getToolCallPause(err)
     if (pause) {
@@ -744,18 +854,18 @@ export async function orchestrateGeneration(
         finishReason: 'tool-call-paused',
         usage: processorState.usage,
       }
-      await persistStreamingMessage(sessionId, targetMsg, { refreshCounting: true })
+      await persistFinalMessage(targetMsg)
       return
     }
 
-    if (controller.signal.aborted) {
+    if (controller.signal.aborted || isNativeGenerationStopRequested(controller.signal)) {
       targetMsg = {
         ...targetMsg,
         generating: false,
         cancel: undefined,
         status: [],
       }
-      await persistStreamingMessage(sessionId, targetMsg, { refreshCounting: true })
+      await persistFinalMessage(targetMsg)
       return
     }
 
@@ -763,9 +873,12 @@ export async function orchestrateGeneration(
       agentMode: getSessionAgentModeEntry(sessionId, session).value,
       operationType: options?.operationType,
     })
-    await persistStreamingMessage(sessionId, targetMsg, { refreshCounting: true })
+    await persistFinalMessage(targetMsg)
   } finally {
-    await acknowledgeNativeStreams(releaseNativeGenerationContext(controller.signal))
+    const streamIds = releaseNativeGenerationContext(controller.signal)
+    if (finalCommitSucceeded) {
+      await acknowledgeNativeStreams(streamIds)
+    }
   }
 }
 

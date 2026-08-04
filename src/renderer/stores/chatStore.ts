@@ -693,6 +693,10 @@ export async function updateMessageCache(sessionId: string, messageId: string, u
   return await updateMessage(sessionId, messageId, updater, true)
 }
 
+export function updateMessageCacheSync(sessionId: string, messageId: string, updater: Updater<Message>) {
+  updateSessionCacheSync(sessionId, (session) => updateMessageInSession(session, messageId, updater))
+}
+
 export async function updateMessages(sessionId: string, updater: Updater<Message[]>) {
   return await updateSessionWithMessages(sessionId, (session) => {
     if (!session) {
@@ -714,54 +718,46 @@ export async function updateMessage(
 ) {
   const updateFn = onlyUpdateCache ? updateSessionCache : updateSessionWithMessages
 
-  await updateFn(sessionId, (session) => {
-    if (!session) {
-      throw new Error(`session ${sessionId} not found`)
-    }
+  await updateFn(sessionId, (session) => updateMessageInSession(session, messageId, updater))
+}
 
-    const updateMessages = (messages: Message[]) => {
-      return messages.map((m) => {
-        if (m.id !== messageId) {
-          return m
-        }
-        const updated = typeof updater === 'function' ? updater(m) : updater
-        return {
-          ...m,
-          ...updated,
-        } satisfies Message
-      })
-    }
-    const message = session.messages.find((m) => m.id === messageId)
-    if (message) {
+function updateMessageInSession(
+  session: Session | null | undefined,
+  messageId: string,
+  updater: Updater<Message>
+): Session {
+  if (!session) {
+    throw new Error('Session not found while updating message')
+  }
+
+  const updateMessages = (messages: Message[]) =>
+    messages.map((message) => {
+      if (message.id !== messageId) return message
+      const updated = typeof updater === 'function' ? updater(message) : updater
       return {
-        ...session,
-        messages: updateMessages(session.messages),
-      }
-    }
+        ...message,
+        ...updated,
+      } satisfies Message
+    })
 
-    // try find message in threads
-    if (session.threads) {
-      for (const thread of session.threads) {
-        const message = thread.messages.find((m) => m.id === messageId)
-        if (message) {
-          return {
-            ...session,
-            threads: session.threads.map((th) => {
-              if (th.id !== thread.id) {
-                return th
-              }
-              return {
-                ...th,
-                messages: updateMessages(th.messages),
-              }
-            }),
-          } satisfies Session
-        }
-      }
+  if (session.messages.some((message) => message.id === messageId)) {
+    return {
+      ...session,
+      messages: updateMessages(session.messages),
     }
+  }
 
-    return session
-  })
+  const targetThread = session.threads?.find((thread) => thread.messages.some((message) => message.id === messageId))
+  if (targetThread) {
+    return {
+      ...session,
+      threads: session.threads?.map((thread) =>
+        thread.id === targetThread.id ? { ...thread, messages: updateMessages(thread.messages) } : thread
+      ),
+    }
+  }
+
+  return session
 }
 
 export async function removeMessage(sessionId: string, messageId: string) {

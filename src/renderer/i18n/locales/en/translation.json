@@ -1263,5 +1263,6 @@
   "ChatBox Pure is generating a reply": "ChatBox Pure is generating a reply",
   "You can leave the app or turn off the screen.": "You can leave the app or turn off the screen.",
   "Reply generated": "Reply generated",
+  "The connection ended before the provider confirmed that the reply was complete.": "The connection ended before the provider confirmed that the reply was complete.",
   "Tap to return to ChatBox Pure and view the reply.": "Tap to return to ChatBox Pure and view the reply."
 }

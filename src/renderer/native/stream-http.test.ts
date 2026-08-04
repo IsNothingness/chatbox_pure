@@ -160,8 +160,8 @@ describe('native pull-backed stream', () => {
     expect(decoder.decode(second.value)).toBe('second')
     expect(terminal).toEqual({ value: undefined, done: true })
     expect(mocks.attachStream.mock.calls).toEqual([
-      [{ id: streamId, afterSequence: -1, maxChunks: 128, maxBytes: 256 * 1024 }],
-      [{ id: streamId, afterSequence: 0, maxChunks: 128, maxBytes: 256 * 1024 }],
+      [{ id: streamId, afterSequence: -1, maxChunks: 32, maxBytes: 64 * 1024 }],
+      [{ id: streamId, afterSequence: 0, maxChunks: 32, maxBytes: 64 * 1024 }],
     ])
   })
 
@@ -234,8 +234,8 @@ describe('native pull-backed stream', () => {
     expect(mocks.attachStream).toHaveBeenLastCalledWith({
       id: 'stream-1',
       afterSequence: 0,
-      maxChunks: 128,
-      maxBytes: 256 * 1024,
+      maxChunks: 32,
+      maxBytes: 64 * 1024,
     })
   })
 
@@ -335,5 +335,119 @@ describe('native pull-backed stream', () => {
 
     expect(new TextDecoder().decode(result.value)).toBe('only-on-resume')
     expect(mocks.attachStream).toHaveBeenCalledTimes(2)
+  })
+
+  test('drains a multi-megabyte terminal backlog without gaps or truncation', async () => {
+    const payloads = Array.from({ length: 640 }, (_, index) => {
+      const prefix = `chunk-${index.toString().padStart(4, '0')}:`
+      return prefix + String.fromCharCode(65 + (index % 26)).repeat(4096 - prefix.length)
+    })
+    mocks.attachStream.mockImplementation(
+      ({
+        id,
+        afterSequence,
+        maxChunks,
+      }: {
+        id: string
+        afterSequence: number
+        maxChunks: number
+        maxBytes: number
+      }) => {
+        const start = afterSequence + 1
+        const selected = payloads.slice(start, start + maxChunks)
+        return Promise.resolve({
+          id,
+          state: 'ended',
+          lastSequence: payloads.length - 1,
+          createdAt: 1,
+          chunks: selected.map((chunk, offset) => ({ sequence: start + offset, chunk })),
+          hasMore: start + selected.length < payloads.length,
+        })
+      }
+    )
+
+    const stream = createNativeReadableStream(
+      { url: 'https://example.com/stream', method: 'POST', headers: {}, body: '{}' },
+      {
+        keepAlive: true,
+        notificationTitle: 'Generating',
+        notificationBody: 'Please wait',
+        resumeStreamId: 'stream-long',
+      }
+    )
+    const reader = stream.getReader()
+    setRendererActive(true)
+
+    const decoder = new TextDecoder()
+    let received = ''
+    while (true) {
+      const result = await reader.read()
+      if (result.done) break
+      received += decoder.decode(result.value, { stream: true })
+    }
+    received += decoder.decode()
+
+    expect(received).toBe(payloads.join(''))
+    expect(mocks.attachStream.mock.calls.length).toBeGreaterThan(10)
+  })
+
+  test('drains every cached chunk from a cancelled native task before closing', async () => {
+    mocks.attachStream.mockResolvedValue({
+      id: 'stream-cancelled',
+      state: 'cancelled',
+      lastSequence: 1,
+      createdAt: 1,
+      chunks: [
+        { sequence: 0, chunk: 'valid-prefix-' },
+        { sequence: 1, chunk: 'valid-tail' },
+      ],
+      hasMore: false,
+    })
+
+    const stream = createNativeReadableStream(
+      { url: 'https://example.com/stream', method: 'POST', headers: {}, body: '{}' },
+      {
+        keepAlive: true,
+        notificationTitle: 'Generating',
+        notificationBody: 'Please wait',
+        resumeStreamId: 'stream-cancelled',
+      }
+    )
+    const reader = stream.getReader()
+    setRendererActive(true)
+
+    const decoder = new TextDecoder()
+    const first = await reader.read()
+    const second = await reader.read()
+    await expect(reader.read()).resolves.toEqual({ value: undefined, done: true })
+    expect(decoder.decode(first.value) + decoder.decode(second.value)).toBe('valid-prefix-valid-tail')
+  })
+
+  test('delivers a cached transport-error tail before surfacing the error', async () => {
+    mocks.attachStream.mockResolvedValue({
+      id: 'stream-error',
+      state: 'error',
+      error: 'socket closed',
+      lastSequence: 0,
+      createdAt: 1,
+      chunks: [{ sequence: 0, chunk: 'partial-but-valid' }],
+      hasMore: false,
+    })
+
+    const stream = createNativeReadableStream(
+      { url: 'https://example.com/stream', method: 'POST', headers: {}, body: '{}' },
+      {
+        keepAlive: true,
+        notificationTitle: 'Generating',
+        notificationBody: 'Please wait',
+        resumeStreamId: 'stream-error',
+      }
+    )
+    const reader = stream.getReader()
+    setRendererActive(true)
+
+    const first = await reader.read()
+    expect(new TextDecoder().decode(first.value)).toBe('partial-but-valid')
+    await expect(reader.read()).rejects.toThrow('socket closed')
   })
 })

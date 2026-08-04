@@ -19,9 +19,6 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
 
 /**
  * Process-scoped owner for model response streams.
@@ -37,10 +34,10 @@ final class BackgroundStreamManager {
     static final String STATE_RUNNING = "running";
     static final String STATE_ENDED = "ended";
     static final String STATE_ERROR = "error";
+    static final String STATE_CANCELLED = "cancelled";
 
     private static final int MAX_BUFFERED_BYTES = 32 * 1024 * 1024;
     private static final long TERMINAL_RETENTION_MS = 60L * 60L * 1000L;
-    private static final long PERSIST_DEBOUNCE_MS = 250L;
     private static volatile BackgroundStreamManager instance;
 
     static final class StreamRequest {
@@ -126,11 +123,8 @@ final class BackgroundStreamManager {
         long terminalAt;
         int bufferedBytes;
         boolean started;
-        boolean persistenceScheduled;
         boolean removed;
-        boolean terminalDurable;
         boolean completionNotified;
-        long durableThrough = -1;
 
         StreamTask(
             String id,
@@ -183,15 +177,12 @@ final class BackgroundStreamManager {
     }
 
     private final Context appContext;
-    private final BackgroundStreamStore persistenceStore;
     private final Map<String, StreamTask> tasks = new ConcurrentHashMap<>();
     private final ExecutorService executor = Executors.newCachedThreadPool();
-    private final ScheduledExecutorService persistenceExecutor = Executors.newSingleThreadScheduledExecutor();
 
     private BackgroundStreamManager(Context context) {
         appContext = context.getApplicationContext();
-        persistenceStore = new BackgroundStreamStore(appContext);
-        loadPersistedTasks();
+        GenerationDebugLog.event(appContext, "debug_log_started");
     }
 
     static BackgroundStreamManager getInstance(Context context) {
@@ -232,7 +223,12 @@ final class BackgroundStreamManager {
         );
         boolean created = tasks.putIfAbsent(id, task) == null;
         if (created) {
-            persistTaskSoon(task);
+            Map<String, Object> fields = new HashMap<>();
+            fields.put("streamId", task.id);
+            fields.put("sessionId", task.sessionId);
+            fields.put("messageId", task.messageId);
+            fields.put("keepAlive", task.keepAlive);
+            GenerationDebugLog.event(appContext, "stream_created", fields);
         }
         return created;
     }
@@ -252,7 +248,10 @@ final class BackgroundStreamManager {
             task.started = true;
             task.state = STATE_RUNNING;
         }
-        persistTaskNow(task);
+        Map<String, Object> fields = new HashMap<>();
+        fields.put("streamId", task.id);
+        fields.put("state", task.state);
+        GenerationDebugLog.event(appContext, "stream_started", fields);
         executor.execute(() -> runTask(task));
         return true;
     }
@@ -277,33 +276,44 @@ final class BackgroundStreamManager {
             return;
         }
         synchronized (task.lock) {
-            if (!isTerminal(task.state) || !task.terminalDurable) {
+            if (!isTerminal(task.state)) {
                 return;
             }
             task.removed = true;
         }
         tasks.remove(id, task);
-        deletePersistedTask(id);
+        Map<String, Object> fields = new HashMap<>();
+        fields.put("streamId", task.id);
+        fields.put("state", task.state);
+        fields.put("totalBytes", task.bufferedBytes);
+        GenerationDebugLog.event(appContext, "stream_acknowledged", fields);
     }
 
     void cancel(String id) {
-        StreamTask task = tasks.remove(id);
+        StreamTask task = tasks.get(id);
         if (task == null) {
             return;
         }
         HttpURLConnection connection;
         Thread workerThread;
         synchronized (task.lock) {
+            if (isTerminal(task.state)) {
+                return;
+            }
             connection = task.connection;
             workerThread = task.workerThread;
-            task.removed = true;
             task.request = null;
             task.connection = null;
             task.workerThread = null;
             task.error = "Cancelled";
-            task.state = STATE_ERROR;
+            task.state = STATE_CANCELLED;
             task.terminalAt = System.currentTimeMillis();
         }
+        Map<String, Object> cancelFields = new HashMap<>();
+        cancelFields.put("streamId", task.id);
+        cancelFields.put("lastSequence", task.nextSequence - 1);
+        cancelFields.put("totalBytes", task.bufferedBytes);
+        GenerationDebugLog.event(appContext, "cancel_requested", cancelFields);
         if (connection != null) {
             connection.disconnect();
         }
@@ -313,7 +323,7 @@ final class BackgroundStreamManager {
         if (task.keepAlive) {
             BackgroundGenerationService.stop(appContext, id);
         }
-        deletePersistedTask(id);
+        logSealed(task);
     }
 
     private void runTask(StreamTask task) {
@@ -431,7 +441,12 @@ final class BackgroundStreamManager {
             task.bufferedBytes += chunkBytes;
             task.chunks.add(new ChunkRecord(sequence, chunk));
         }
-        persistTaskSoon(task);
+        Map<String, Object> fields = new HashMap<>();
+        fields.put("streamId", task.id);
+        fields.put("sequence", sequence);
+        fields.put("chunkBytes", chunkBytes);
+        fields.put("totalBytes", task.bufferedBytes);
+        GenerationDebugLog.event(appContext, "native_chunk", fields);
     }
 
     private void endTask(StreamTask task) {
@@ -441,9 +456,9 @@ final class BackgroundStreamManager {
             }
             task.state = STATE_ENDED;
             task.terminalAt = System.currentTimeMillis();
-            task.terminalDurable = false;
         }
-        persistTaskNow(task);
+        logSealed(task);
+        notifyCompletionIfNeeded(task);
     }
 
     private void failTask(StreamTask task, IOException error) {
@@ -455,9 +470,14 @@ final class BackgroundStreamManager {
             task.state = STATE_ERROR;
             task.error = message;
             task.terminalAt = System.currentTimeMillis();
-            task.terminalDurable = false;
         }
-        persistTaskNow(task);
+        Map<String, Object> fields = new HashMap<>();
+        fields.put("streamId", task.id);
+        fields.put("lastSequence", task.nextSequence - 1);
+        fields.put("totalBytes", task.bufferedBytes);
+        fields.put("errorType", error.getClass().getSimpleName());
+        GenerationDebugLog.event(appContext, "native_failed", fields);
+        logSealed(task);
     }
 
     private void finishTask(StreamTask task) {
@@ -481,6 +501,7 @@ final class BackgroundStreamManager {
         synchronized (task.lock) {
             List<ChunkRecord> selected = new ArrayList<>();
             boolean hasMore = false;
+            int selectedBytes = 0;
             if (afterSequence != Long.MAX_VALUE) {
                 int low = 0;
                 int high = task.chunks.size();
@@ -492,7 +513,6 @@ final class BackgroundStreamManager {
                         high = middle;
                     }
                 }
-                int selectedBytes = 0;
                 int index = low;
                 while (index < task.chunks.size() && selected.size() < maxChunks) {
                     ChunkRecord record = task.chunks.get(index);
@@ -506,18 +526,29 @@ final class BackgroundStreamManager {
                 }
                 hasMore = index < task.chunks.size();
             }
-            return new StreamSnapshot(
+            StreamSnapshot snapshot = new StreamSnapshot(
                 task.id,
                 task.clientRequestId,
                 task.sessionId,
                 task.messageId,
-                isTerminal(task.state) && !task.terminalDurable ? STATE_RUNNING : task.state,
+                task.state,
                 task.error,
                 task.nextSequence - 1,
                 task.createdAt,
                 selected,
                 hasMore
             );
+            if (afterSequence != Long.MAX_VALUE && (!selected.isEmpty() || isTerminal(task.state))) {
+                Map<String, Object> fields = new HashMap<>();
+                fields.put("streamId", task.id);
+                fields.put("state", task.state);
+                fields.put("lastSequence", task.nextSequence - 1);
+                fields.put("chunkCount", selected.size());
+                fields.put("batchBytes", selectedBytes);
+                fields.put("hasMore", hasMore);
+                GenerationDebugLog.event(appContext, "snapshot_read", fields);
+            }
+            return snapshot;
         }
     }
 
@@ -528,7 +559,7 @@ final class BackgroundStreamManager {
     }
 
     private static boolean isTerminal(String state) {
-        return STATE_ENDED.equals(state) || STATE_ERROR.equals(state);
+        return STATE_ENDED.equals(state) || STATE_ERROR.equals(state) || STATE_CANCELLED.equals(state);
     }
 
     private void cleanupExpiredTasks() {
@@ -544,115 +575,33 @@ final class BackgroundStreamManager {
                     task.removed = true;
                 }
                 tasks.remove(entry.getKey(), task);
-                deletePersistedTask(entry.getKey());
             }
         }
     }
 
-    private void persistTaskSoon(StreamTask task) {
+    private void logSealed(StreamTask task) {
+        Map<String, Object> fields = new HashMap<>();
+        fields.put("streamId", task.id);
+        fields.put("state", task.state);
+        fields.put("lastSequence", task.nextSequence - 1);
+        fields.put("totalBytes", task.bufferedBytes);
+        fields.put("durationMs", Math.max(0L, task.terminalAt - task.createdAt));
+        GenerationDebugLog.event(appContext, "native_sealed", fields);
+    }
+
+    private void notifyCompletionIfNeeded(StreamTask task) {
         synchronized (task.lock) {
-            if (task.removed || task.persistenceScheduled) {
+            if (
+                task.completionNotified ||
+                !STATE_ENDED.equals(task.state) ||
+                !task.keepAlive ||
+                "off".equals(task.completionNotificationMode)
+            ) {
                 return;
             }
-            task.persistenceScheduled = true;
+            task.completionNotified = true;
         }
-        persistenceExecutor.schedule(
-            () -> {
-                synchronized (task.lock) {
-                    task.persistenceScheduled = false;
-                }
-                if (!persistTask(task)) {
-                    persistTaskSoon(task);
-                }
-            },
-            PERSIST_DEBOUNCE_MS,
-            TimeUnit.MILLISECONDS
-        );
-    }
-
-    private boolean persistTaskNow(StreamTask task) {
-        Future<Boolean> persistence = persistenceExecutor.submit(() -> persistTask(task));
-        try {
-            boolean persisted = persistence.get();
-            if (!persisted) {
-                persistTaskSoon(task);
-            }
-            return persisted;
-        } catch (InterruptedException error) {
-            Thread.currentThread().interrupt();
-            Log.w(TAG, "Interrupted while persisting stream " + task.id, error);
-        } catch (Exception error) {
-            Log.w(TAG, "Could not persist stream " + task.id, error);
-        }
-        persistTaskSoon(task);
-        return false;
-    }
-
-    private boolean persistTask(StreamTask task) {
-        BackgroundStreamStore.StoredTask persistedTask;
-        List<BackgroundStreamStore.StoredChunk> newChunks = new ArrayList<>();
-        synchronized (task.lock) {
-            if (task.removed) {
-                return true;
-            }
-            for (ChunkRecord record : task.chunks) {
-                if (record.sequence <= task.durableThrough) {
-                    continue;
-                }
-                newChunks.add(
-                    new BackgroundStreamStore.StoredChunk(
-                        record.sequence,
-                        record.chunk,
-                        record.chunk.length
-                    )
-                );
-            }
-            persistedTask = new BackgroundStreamStore.StoredTask(
-                task.id,
-                task.clientRequestId,
-                task.sessionId,
-                task.messageId,
-                task.state,
-                task.error,
-                task.createdAt,
-                task.terminalAt,
-                task.nextSequence - 1,
-                task.bufferedBytes,
-                Collections.emptyList()
-            );
-        }
-
-        try {
-            persistenceStore.writeTask(persistedTask, newChunks);
-        } catch (RuntimeException error) {
-            Log.w(TAG, "Could not write stream " + task.id + " to SQLite", error);
-            return false;
-        }
-
-        boolean notifyCompletion = false;
-        synchronized (task.lock) {
-            if (task.removed) {
-                persistenceStore.deleteTask(task.id);
-                return true;
-            }
-            task.durableThrough = Math.max(task.durableThrough, persistedTask.lastSequence);
-            if (
-                isTerminal(task.state) &&
-                task.durableThrough >= task.nextSequence - 1
-            ) {
-                task.terminalDurable = true;
-                if (
-                    STATE_ENDED.equals(task.state) &&
-                    task.keepAlive &&
-                    !"off".equals(task.completionNotificationMode) &&
-                    !task.completionNotified
-                ) {
-                    task.completionNotified = true;
-                    notifyCompletion = true;
-                }
-            }
-        }
-        if (notifyCompletion && !MainActivity.isAppVisible()) {
+        if (!MainActivity.isAppVisible()) {
             BackgroundGenerationService.showCompletionNotification(
                 appContext,
                 task.id,
@@ -662,48 +611,5 @@ final class BackgroundStreamManager {
                 task.completionNotificationMode
             );
         }
-        return true;
-    }
-
-    private void loadPersistedTasks() {
-        for (BackgroundStreamStore.StoredTask stored : persistenceStore.loadTasks()) {
-            StreamTask task = new StreamTask(
-                stored.id,
-                stored.clientRequestId,
-                stored.sessionId,
-                stored.messageId,
-                false,
-                "off",
-                "",
-                "",
-                null,
-                stored.createdAt
-            );
-            task.started = true;
-            task.state = stored.state;
-            task.error = stored.error;
-            task.terminalAt = stored.terminalAt;
-            for (BackgroundStreamStore.StoredChunk chunk : stored.chunks) {
-                task.chunks.add(new ChunkRecord(chunk.sequence, chunk.payload));
-                task.bufferedBytes += chunk.byteCount;
-                task.nextSequence = Math.max(task.nextSequence, chunk.sequence + 1);
-                task.durableThrough = Math.max(task.durableThrough, chunk.sequence);
-            }
-            task.terminalDurable = isTerminal(stored.state);
-            tasks.putIfAbsent(stored.id, task);
-
-            if (!isTerminal(stored.state)) {
-                task.state = STATE_ERROR;
-                task.error = "Generation stopped because Android terminated the backend process";
-                task.terminalAt = System.currentTimeMillis();
-                task.terminalDurable = false;
-                persistTaskNow(task);
-            }
-        }
-        cleanupExpiredTasks();
-    }
-
-    private void deletePersistedTask(String id) {
-        persistenceStore.deleteTask(id);
     }
 }

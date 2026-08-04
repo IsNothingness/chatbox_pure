@@ -1,9 +1,11 @@
 import { describe, expect, test } from 'vitest'
 import {
   consumeNativeGenerationContext,
+  isNativeGenerationStopRequested,
   recordAttachedNativeStream,
   registerNativeGenerationContext,
   releaseNativeGenerationContext,
+  requestNativeGenerationStop,
 } from './background-generation-context'
 
 describe('native background generation context', () => {
@@ -44,5 +46,20 @@ describe('native background generation context', () => {
 
     expect(releaseNativeGenerationContext(controller.signal)).toEqual(['stream-a', 'stream-b'])
     expect(consumeNativeGenerationContext(controller.signal)).toBeUndefined()
+  })
+
+  test('requests a graceful stop without discarding attached stream buffers', () => {
+    const controller = new AbortController()
+    registerNativeGenerationContext(controller.signal, {
+      clientRequestId: 'session-3:message-3',
+      sessionId: 'session-3',
+      messageId: 'message-3',
+    })
+    recordAttachedNativeStream(controller.signal, 'stream-a')
+
+    expect(isNativeGenerationStopRequested(controller.signal)).toBe(false)
+    expect(requestNativeGenerationStop(controller.signal)).toEqual(['stream-a'])
+    expect(isNativeGenerationStopRequested(controller.signal)).toBe(true)
+    expect(controller.signal.aborted).toBe(false)
   })
 })

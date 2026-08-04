@@ -169,6 +169,28 @@ public class PureStreamHttpPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void debugGenerationLog(PluginCall call) {
+        if (!GenerationDebugLog.isEnabled(getContext())) {
+            call.resolve();
+            return;
+        }
+        String event = call.getString("event");
+        JSObject fieldsObject = call.getObject("fields", new JSObject());
+        if (event == null) {
+            call.reject("Debug event is required");
+            return;
+        }
+        Map<String, Object> fields = new HashMap<>();
+        Iterator<String> keys = fieldsObject.keys();
+        while (keys.hasNext()) {
+            String key = keys.next();
+            fields.put(key, fieldsObject.opt(key));
+        }
+        GenerationDebugLog.event(getContext(), event, fields);
+        call.resolve();
+    }
+
+    @PluginMethod
     public void requestNotificationPermission(PluginCall call) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
             resolvePermission(call, true);

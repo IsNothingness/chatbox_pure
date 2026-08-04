@@ -131,9 +131,11 @@ export async function modifyMessage(
  */
 export function updateStreamingCache(sessionId: string, message: Message): void {
   message.timestamp = Date.now()
-  chatStore.updateMessageCache(sessionId, message.id, message).catch((err) => {
-    console.error('Failed to update streaming cache:', err)
-  })
+  try {
+    chatStore.updateMessageCacheSync(sessionId, message.id, message)
+  } catch (error) {
+    console.error('Failed to update streaming cache:', error)
+  }
 }
 
 /**
