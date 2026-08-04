@@ -207,8 +207,13 @@ function RouteComponent() {
       return false
     }
     if (lastGeneratingMessage?.generating) {
-      lastGeneratingMessage?.cancel?.()
-      void modifyMessage(currentSession.id, { ...lastGeneratingMessage, generating: false }, true)
+      if (lastGeneratingMessage.cancel) {
+        // Native streams use a two-phase stop: stop receiving first, then drain
+        // and persist the durable tail before the orchestration clears generating.
+        lastGeneratingMessage.cancel()
+      } else {
+        void modifyMessage(currentSession.id, { ...lastGeneratingMessage, generating: false }, true)
+      }
     }
     return true
   }, [currentSession, lastGeneratingMessage])

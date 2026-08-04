@@ -200,6 +200,8 @@ const MAX_PULL_CHUNKS = 32
 const DEFAULT_PULL_BYTES = 64 * 1024
 const MIN_PULL_BYTES = 32 * 1024
 const MAX_PULL_RETRY_DELAY_MS = 1000
+const MAX_PENDING_CHUNKS = 256
+const MAX_PENDING_BYTES = 1024 * 1024
 
 function createPureAndroidReadableStream(
   options: StartStreamOptions,
@@ -217,7 +219,8 @@ function createPureAndroidReadableStream(
   const textEncoder = new TextEncoder()
   const pendingChunks = new Map<number, Uint8Array>()
   let expectedSequence = 0
-  let nativeHasMoreBacklog = false
+  let nativeReadThrough = -1
+  let pendingBytes = 0
   let terminalSnapshot: { state: 'ended' | 'error'; lastSequence: number; error?: string } | null = null
   let pullMaxBytes = DEFAULT_PULL_BYTES
   let consecutivePullFailures = 0
@@ -268,8 +271,14 @@ function createPureAndroidReadableStream(
   const finishIfReady = (controller: ReadableStreamDefaultController<Uint8Array>) => {
     if (!terminalSnapshot || expectedSequence <= terminalSnapshot.lastSequence) return false
     const terminal = terminalSnapshot
+    const gracefulCancellation = terminal.state === 'error' && terminal.error === 'Cancelled'
+    // controller.error() discards chunks already queued inside ReadableStream. Wait
+    // until downstream asks for more before surfacing a real transport error.
+    if (terminal.state === 'error' && !gracefulCancellation && (controller.desiredSize ?? 0) <= 0) {
+      return false
+    }
     terminalSnapshot = null
-    settle(controller, terminal.state === 'error' ? 'error' : 'end', terminal.error)
+    settle(controller, terminal.state === 'error' && !gracefulCancellation ? 'error' : 'end', terminal.error)
     return true
   }
 
@@ -279,6 +288,7 @@ function createPureAndroidReadableStream(
       pendingChunks.delete(expectedSequence)
       expectedSequence += 1
       if (bytes?.byteLength) {
+        pendingBytes -= bytes.byteLength
         controller.enqueue(bytes)
       }
     }
@@ -294,20 +304,25 @@ function createPureAndroidReadableStream(
     return bytes
   }
 
-  const acceptChunk = (
-    controller: ReadableStreamDefaultController<Uint8Array>,
-    sequence: number,
-    chunk: NativeStreamChunk
-  ) => {
-    if (sequence < expectedSequence || pendingChunks.has(sequence)) return
+  const acceptChunk = (sequence: number, chunk: NativeStreamChunk) => {
+    if (sequence <= nativeReadThrough) return
+    if (sequence !== nativeReadThrough + 1) {
+      console.warn(`Native stream ${streamId} returned a non-contiguous chunk at ${sequence}`)
+      return
+    }
     const bytes = chunk.chunkBase64 ? decodeBase64(chunk.chunkBase64) : textEncoder.encode(chunk.chunk || '')
     pendingChunks.set(sequence, bytes)
-    flush(controller)
+    pendingBytes += bytes.byteLength
+    nativeReadThrough = sequence
+  }
+
+  const hasPendingCapacity = () => {
+    return pendingChunks.size < MAX_PENDING_CHUNKS && pendingBytes < MAX_PENDING_BYTES
   }
 
   const schedulePull = (delay: number) => {
     if (!appActive || !documentVisible || !taskReady || streamSettled || !activeController || pullTimer) return
-    if ((activeController.desiredSize ?? 1) <= 0 || pendingChunks.has(expectedSequence)) return
+    if (!hasPendingCapacity()) return
     if (pullInFlight) {
       pullRequested = true
       return
@@ -364,7 +379,7 @@ function createPureAndroidReadableStream(
     try {
       const snapshot = await PureStreamHttp.attachStream({
         id: streamId,
-        afterSequence: expectedSequence - 1,
+        afterSequence: nativeReadThrough,
         maxChunks: MAX_PULL_CHUNKS,
         maxBytes: pullMaxBytes,
       })
@@ -374,7 +389,6 @@ function createPureAndroidReadableStream(
       pullMaxBytes = DEFAULT_PULL_BYTES
       receivedChunks = snapshot.chunks.length > 0
       hasMoreBacklog = snapshot.hasMore
-      nativeHasMoreBacklog = snapshot.hasMore
       if (snapshot.state === 'ended' || snapshot.state === 'error') {
         terminalSnapshot = {
           state: snapshot.state,
@@ -383,8 +397,9 @@ function createPureAndroidReadableStream(
         }
       }
       for (const record of snapshot.chunks) {
-        acceptChunk(controller, record.sequence, record)
+        acceptChunk(record.sequence, record)
       }
+      flush(controller)
 
       if (finishIfReady(controller)) return
     } catch (error) {
@@ -400,7 +415,7 @@ function createPureAndroidReadableStream(
       console.warn(`Failed to read native stream ${streamId}:`, error)
     } finally {
       pullInFlight = false
-      if (!streamSettled && !pendingChunks.has(expectedSequence)) {
+      if (!streamSettled && hasPendingCapacity()) {
         const retryDelay = Math.min(
           MAX_PULL_RETRY_DELAY_MS,
           IDLE_PULL_INTERVAL_MS * 2 ** Math.max(0, consecutivePullFailures - 1)
@@ -408,7 +423,7 @@ function createPureAndroidReadableStream(
         schedulePull(
           pullFailed
             ? retryDelay
-            : pullRequested || hasMoreBacklog || nativeHasMoreBacklog
+            : pullRequested || hasMoreBacklog
               ? 0
               : receivedChunks
                 ? ACTIVE_PULL_INTERVAL_MS

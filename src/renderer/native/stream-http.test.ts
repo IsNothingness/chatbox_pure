@@ -194,6 +194,62 @@ describe('native pull-backed stream', () => {
     expect([...(result.value ?? new Uint8Array())]).toEqual([255, 0, 10, 128])
   })
 
+  test('delivers the durable tail before surfacing a terminal transport error', async () => {
+    mocks.attachStream.mockResolvedValue({
+      id: 'stream-1',
+      state: 'error',
+      error: 'network failed',
+      lastSequence: 0,
+      createdAt: 1,
+      chunks: [{ sequence: 0, chunk: 'durable-tail' }],
+      hasMore: false,
+    })
+
+    const stream = createNativeReadableStream(
+      { url: 'https://example.com/stream', method: 'POST', headers: {}, body: '{}' },
+      {
+        keepAlive: true,
+        notificationTitle: 'Generating',
+        notificationBody: 'Please wait',
+        resumeStreamId: 'stream-1',
+      }
+    )
+    const reader = stream.getReader()
+    setRendererActive(true)
+
+    const tail = await reader.read()
+    expect(new TextDecoder().decode(tail.value)).toBe('durable-tail')
+    await expect(reader.read()).rejects.toThrow('network failed')
+  })
+
+  test('closes a gracefully cancelled stream after delivering its durable tail', async () => {
+    mocks.attachStream.mockResolvedValue({
+      id: 'stream-1',
+      state: 'error',
+      error: 'Cancelled',
+      lastSequence: 0,
+      createdAt: 1,
+      chunks: [{ sequence: 0, chunk: 'last-complete-event' }],
+      hasMore: false,
+    })
+
+    const stream = createNativeReadableStream(
+      { url: 'https://example.com/stream', method: 'POST', headers: {}, body: '{}' },
+      {
+        keepAlive: true,
+        notificationTitle: 'Generating',
+        notificationBody: 'Please wait',
+        resumeStreamId: 'stream-1',
+      }
+    )
+    const reader = stream.getReader()
+    setRendererActive(true)
+
+    const tail = await reader.read()
+    expect(new TextDecoder().decode(tail.value)).toBe('last-complete-event')
+    await expect(reader.read()).resolves.toEqual({ value: undefined, done: true })
+  })
+
   test('stops polling in the background and immediately resumes from the last cursor', async () => {
     mocks.attachStream
       .mockResolvedValueOnce({
@@ -393,6 +449,52 @@ describe('native pull-backed stream', () => {
     for (const [options] of mocks.attachStream.mock.calls) {
       expect(options).toMatchObject({ maxChunks: 32, maxBytes: 64 * 1024 })
     }
+  })
+
+  test('prefetches native backlog independently from downstream reader demand', async () => {
+    const totalChunks = 96
+    mocks.attachStream.mockImplementation(
+      ({ id, afterSequence, maxChunks }: { id: string; afterSequence: number; maxChunks: number }) => {
+        const firstSequence = afterSequence + 1
+        const endSequence = Math.min(totalChunks, firstSequence + maxChunks)
+        return Promise.resolve({
+          id,
+          state: 'ended',
+          lastSequence: totalChunks - 1,
+          createdAt: 1,
+          chunks: Array.from({ length: endSequence - firstSequence }, (_, index) => ({
+            sequence: firstSequence + index,
+            chunk: `${firstSequence + index},`,
+          })),
+          hasMore: endSequence < totalChunks,
+        })
+      }
+    )
+
+    const stream = createNativeReadableStream(
+      { url: 'https://example.com/stream', method: 'POST', headers: {}, body: '{}' },
+      {
+        keepAlive: true,
+        notificationTitle: 'Generating',
+        notificationBody: 'Please wait',
+        resumeStreamId: 'stream-1',
+      }
+    )
+    const reader = stream.getReader()
+    setRendererActive(true)
+
+    // The native cursor must keep advancing even when the model parser has not
+    // consumed the first queued ReadableStream chunk yet.
+    await vi.waitFor(() => expect(mocks.attachStream).toHaveBeenCalledTimes(3))
+
+    const decoder = new TextDecoder()
+    let received = ''
+    while (true) {
+      const result = await reader.read()
+      if (result.done) break
+      received += decoder.decode(result.value)
+    }
+    expect(received).toBe(Array.from({ length: totalChunks }, (_, index) => `${index},`).join(''))
   })
 
   test('shrinks the bridge page and resumes after a transient snapshot failure', async () => {
